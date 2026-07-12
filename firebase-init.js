@@ -11,6 +11,9 @@ firebase.initializeApp({
   appId: "1:477169972182:web:c92372bb2d8af057deaa77"
 });
 
+firebase.firestore().enablePersistence({ synchronizeTabs: false }).catch(() => {});
+firebase.firestore().settings({ experimentalForceLongPolling: true });
+
 const db = firebase.firestore();
 const GAS_URL = "/api/gas"; 
 
