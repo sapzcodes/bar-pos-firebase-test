@@ -1,0 +1,4214 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0"
+    />
+    <title>Pushpam A/C Bar POS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script
+      src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"
+      crossorigin
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"
+      crossorigin
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.9/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+      }
+      body {
+        background: #f7f8fa;
+        color: #1a1a2e;
+        font-family: "Inter", sans-serif;
+        -webkit-tap-highlight-color: transparent;
+      }
+      ::-webkit-scrollbar {
+        width: 3px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f0f0f5;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #c8c8d8;
+        border-radius: 4px;
+      }
+      @keyframes slideUp {
+        from {
+          transform: translateY(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      input,
+      select,
+      textarea {
+        background: #ffffff;
+        border: 1.5px solid #e0e0ee;
+        color: #1a1a2e;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-family: inherit;
+        font-size: 14px;
+        outline: none;
+        width: 100%;
+        transition: border-color 0.2s;
+      }
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: #c8873a;
+      }
+      button {
+        cursor: pointer;
+        font-family: inherit;
+        transition:
+          opacity 0.15s,
+          transform 0.1s;
+      }
+      button:active {
+        transform: scale(0.97);
+      }
+      @media print {
+        body * {
+          visibility: hidden;
+        }
+        #print-area,
+        #print-area * {
+          visibility: visible;
+        }
+        #print-area {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div
+        id="vb-init"
+        style="
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          font-family: sans-serif;
+          gap: 12px;
+        "
+      >
+        <div
+          style="
+            font-family: Georgia, serif;
+            font-size: 28px;
+            color: #c8873a;
+            letter-spacing: 4px;
+          "
+        >
+          Pushpam A/C Bar
+        </div>
+        <div style="color: #aaa; font-size: 13px">Starting up...</div>
+        <div
+          id="vb-err"
+          style="
+            display: none;
+            margin-top: 8px;
+            padding: 12px 16px;
+            background: #fff0f0;
+            border-radius: 8px;
+            color: #e74c3c;
+            font-size: 12px;
+            max-width: 320px;
+            text-align: center;
+          "
+        ></div>
+      </div>
+    </div>
+    <div id="print-area" style="display: none"></div>
+
+    <script type="text/babel">
+      const { useState, useCallback, useMemo, useEffect, useRef } = React;
+
+      const GAS = "/api/gas";
+      const SESSION_KEY = "pushpam_app_auth";
+
+      const DEFAULT_SETTINGS = {
+        barName: "Pushpam A/C Bar",
+        barAddress: "",
+        gstNumber: "",
+        gstRate: 18,
+        gstInclusive: false,
+        tables: "T1,T2,T3,T4,T5,T6,T7,T8",
+        currency: "₹",
+        githubOwner: "",
+        githubRepo: "",
+        githubToken: "",
+        logoPath: "",
+      };
+
+      const CATEGORIES = [
+        "All",
+        "Liquor",
+        "Beer",
+        "Soft Drinks",
+        "Cocktails",
+        "Mocktails",
+      ];
+      const LIQUOR_CATS = ["Liquor", "Beer"];
+
+      async function gasGet(action, body = null) {
+        let url = `${GAS}?action=${action}`;
+        if (body) url += `&body=${encodeURIComponent(JSON.stringify(body))}`;
+        const res = await fetch(url);
+        return res.json();
+      }
+
+      function calcBottlePrice(price30ml, mlPerBottle) {
+        const ml = +mlPerBottle || 750;
+        return Math.round((ml / 30) * +price30ml);
+      }
+      function calcPer30ml(priceBottle, mlPerBottle) {
+        const ml = +mlPerBottle || 750;
+        return Math.round((+priceBottle / (ml / 30)) * 100) / 100;
+      }
+      function cartLineBottles(unit, qty, mlPerBottle) {
+        if (unit === "bottle") return qty;
+        const mlPerShot = unit === "large" ? 60 : 30;
+        return (qty * mlPerShot) / (mlPerBottle || 750);
+      }
+      function bottlesInCart(cart, itemId) {
+        return cart
+          .filter((c) => c.itemId === itemId)
+          .reduce(
+            (sum, c) =>
+              sum + cartLineBottles(c.unit, c.qty, c.mlPerBottle || 750),
+            0,
+          );
+      }
+      function getGstRate(settings) {
+        return (+settings.gstRate || 18) / 100;
+      }
+      function calcTotals(subtotal, settings) {
+        const rate = getGstRate(settings);
+        if (settings.gstInclusive) {
+          const gstAmount = subtotal - subtotal / (1 + rate);
+          return {
+            subtotal: subtotal / (1 + rate),
+            gstAmount,
+            total: subtotal,
+          };
+        }
+        const gstAmount = subtotal * rate;
+        return { subtotal, gstAmount, total: subtotal + gstAmount };
+      }
+      function isLowStock(qtyAvailable, lowStockThreshold) {
+        return (+qtyAvailable || 0) <= (+lowStockThreshold || 2);
+      }
+      function bottlesToDisplay(qty) {
+        const n = +qty || 0;
+        if (n === 0) return "0 btl";
+        if (n < 1) return `${(n * 750).toFixed(0)}ml`;
+        return `${n % 1 === 0 ? n : n.toFixed(2)} btl`;
+      }
+      function mapInvRow(r) {
+        return {
+          id: r["Item ID"],
+          name: r["Item Name"],
+          category: r["Category"],
+          imageUrl: r["Image URL"] || "",
+          price30ml: +r["Price 30ml"] || 0,
+          priceBottle: +r["Price Bottle"] || 0,
+          mlPerBottle: +r["ML per Bottle"] || 750,
+          qtyAvailable: +r["Qty Available"] || 0,
+          lowStockThreshold: +r["Low Stock Threshold"] || 2,
+          active: r["Active"] !== false && r["Active"] !== "FALSE",
+        };
+      }
+      function mapOrderRow(r) {
+        return {
+          orderId: r["Order ID"],
+          tableNumber: r["Table Number"],
+          customerName: r["Customer Name"],
+          customerPhone: r["Customer Phone"],
+          itemId: r["Item ID"],
+          itemName: r["Item Name"],
+          qty: +r["Qty"],
+          unit: r["Unit"],
+          unitPrice: +r["Unit Price"],
+          lineTotal: +r["Line Total"],
+          status: r["Status"],
+          date: r["Date"],
+          time: r["Time"],
+        };
+      }
+      function mapBillRow(r) {
+        let items = [];
+        try {
+          items =
+            typeof r["Items JSON"] === "string"
+              ? JSON.parse(r["Items JSON"])
+              : r["Items JSON"] || [];
+        } catch (e) {
+          items = [];
+        }
+        return {
+          billId: r["Bill ID"],
+          tableNumber: r["Table Number"],
+          customerName: r["Customer Name"],
+          customerPhone: r["Customer Phone"],
+          subtotal: +r["Subtotal"],
+          gstAmount: +r["GST Amount"],
+          total: +r["Total"],
+          dateTime: r["Date Time"],
+          items,
+        };
+      }
+      function fileToBase64(file) {
+        return new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result);
+          r.onerror = rej;
+          r.readAsDataURL(file);
+        });
+      }
+      async function uploadToGithub(file, itemId, settings) {
+        const { githubOwner, githubRepo, githubToken } = settings;
+        if (!githubOwner || !githubRepo || !githubToken) return "";
+        const base64Full = await fileToBase64(file);
+        const base64Content = base64Full.split(",")[1];
+        const ext = file.type.includes("png") ? "png" : "jpg";
+        const path = `images/${itemId}.${ext}`;
+        let sha = undefined;
+        try {
+          const check = await fetch(
+            `https://api.github.com/repos/${githubOwner}/${githubRepo}/contents/${path}`,
+            { headers: { Authorization: `token ${githubToken}` } },
+          );
+          if (check.ok) {
+            const existing = await check.json();
+            sha = existing.sha;
+          }
+        } catch (_) {}
+        const payload = {
+          message: `Upload image for ${itemId}`,
+          content: base64Content,
+        };
+        if (sha) payload.sha = sha;
+        const res = await fetch(
+          `https://api.github.com/repos/${githubOwner}/${githubRepo}/contents/${path}`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `token ${githubToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        );
+        const json = await res.json();
+        if (json.content?.download_url) return json.content.download_url;
+        return `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/main/${path}`;
+      }
+
+      function printBill(bill, settings) {
+        const halfGst = (bill.gstAmount / 2).toFixed(2);
+        const html = `
+    <style>
+      @page{margin:0;size:auto;}
+      body{font-family:Arial,sans-serif;max-width:320px;margin:10px auto;font-size:12px;padding:0 8px;}
+      .header{background:#1A1A2E;color:#C8873A;text-align:center;padding:12px;}
+      .header h1{font-size:20px;margin:0;letter-spacing:2px;}
+      .header p{color:#ccc;font-size:10px;margin:2px 0;}
+      .meta{padding:8px 12px;border-bottom:1px dashed #ccc;display:flex;justify-content:space-between;font-size:11px;}
+      table{width:100%;border-collapse:collapse;}
+      th{background:#f0f0f0;padding:6px 8px;font-size:10px;}
+      th:first-child{text-align:left;}th:not(:first-child){text-align:right;}
+      td{padding:5px 8px;border-bottom:1px solid #f5f5f5;font-size:11px;}
+      td:first-child{text-align:left;}td:not(:first-child){text-align:right;}
+      .total-row td{font-weight:bold;background:#f9f9f9;}
+      .grand td{font-size:15px;color:#C8873A;font-weight:bold;}
+      .footer{text-align:center;color:#888;font-size:10px;padding:10px;border-top:1px dashed #ccc;margin-top:8px;}
+    </style>
+    <div class="header">
+      <h1>${settings.barName || "Pushpam A/C Bar"}</h1>
+      <p>${settings.barAddress || ""}</p><p>GSTIN: ${settings.gstNumber || ""}</p>
+    </div>
+    <div class="meta"><span>Bill: ${bill.billId}</span><span>${bill.dateTime}</span></div>
+    <div class="meta"><span>Table: ${bill.tableNumber}</span><span>${bill.customerName || "Guest"}</span></div>
+    <table>
+      <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amt</th></tr></thead>
+      <tbody>${bill.items.map((i) => `<tr><td>${i.name}<br><small>${i.unit}</small></td><td>${i.qty}</td><td>₹${(+i.rate || +i.unitPrice || 0).toFixed(0)}</td><td>₹${(+i.lineTotal || 0).toFixed(0)}</td></tr>`).join("")}</tbody>
+      <tfoot>
+        <tr class="total-row"><td colspan="3">Subtotal</td><td>₹${(+bill.subtotal).toFixed(2)}</td></tr>
+        <tr class="total-row"><td colspan="3">CGST (${(+settings.gstRate || 18) / 2}%)</td><td>₹${halfGst}</td></tr>
+        <tr class="total-row"><td colspan="3">SGST (${(+settings.gstRate || 18) / 2}%)</td><td>₹${halfGst}</td></tr>
+        <tr class="total-row grand"><td colspan="3">GRAND TOTAL</td><td>₹${(+bill.total).toFixed(0)}</td></tr>
+      </tfoot>
+    </table>
+    <div class="footer">Thank you! Please drink responsibly.</div>`;
+        const pa = document.getElementById("print-area");
+        pa.innerHTML = html;
+        pa.style.display = "block";
+        window.print();
+        setTimeout(() => {
+          pa.style.display = "none";
+          pa.innerHTML = "";
+        }, 1000);
+      }
+
+      // ── TOAST ────────────────────────────────────────────────────
+      function useToast() {
+        const [toasts, setToasts] = useState([]);
+        const toast = useCallback((msg, type = "info") => {
+          const id = Date.now();
+          setToasts((p) => [...p, { id, msg, type }]);
+          setTimeout(
+            () => setToasts((p) => p.filter((t) => t.id !== id)),
+            3500,
+          );
+        }, []);
+        return { toasts, toast };
+      }
+      function ToastContainer({ toasts }) {
+        const colors = {
+          info: "#C8873A",
+          success: "#27AE60",
+          error: "#E74C3C",
+        };
+        return (
+          <div
+            style={{
+              position: "fixed",
+              top: 70,
+              left: 16,
+              zIndex: 9999,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              maxWidth: "calc(100% - 32px)",
+              pointerEvents: "none",
+              alignItems: "flex-start",
+            }}
+          >
+            {toasts.map((t) => (
+              <div
+                key={t.id}
+                style={{
+                  background: "#FFFFFF",
+                  borderLeft: `4px solid ${colors[t.type]}`,
+                  color: "#1A1A2E",
+                  padding: "12px 16px",
+                  borderRadius: 10,
+                  fontSize: 13,
+                  boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
+                  animation: "slideUp 0.25s ease",
+                  maxWidth: 400,
+                  width: "100%",
+                }}
+              >
+                {t.msg}
+              </div>
+            ))}
+          </div>
+        );
+      }
+
+      // ── SPINNER ──────────────────────────────────────────────────
+      function Spinner({ size = 20, color = "#C8873A" }) {
+        return (
+          <div
+            style={{
+              width: size,
+              height: size,
+              border: `2.5px solid ${color}22`,
+              borderTop: `2.5px solid ${color}`,
+              borderRadius: "50%",
+              animation: "spin 0.7s linear infinite",
+              display: "inline-block",
+              flexShrink: 0,
+            }}
+          />
+        );
+      }
+
+      // ── APP PASSWORD SCREEN ───────────────────────────────────────
+      function AppLoginScreen({ onAuth, toast }) {
+        const [view, setView] = useState("login"); // login | reset
+        const [password, setPassword] = useState("");
+        const [loading, setLoading] = useState(false);
+        // OTP reset state
+        const [otpSent, setOtpSent] = useState(false);
+        const [otp, setOtp] = useState("");
+        const [newPw, setNewPw] = useState("");
+        const [confirmPw, setConfirmPw] = useState("");
+        const [resetLoading, setResetLoading] = useState(false);
+
+        const handleLogin = async () => {
+          if (!password) return;
+          setLoading(true);
+          try {
+            const res = await gasGet("verifyAppPassword", { password });
+            if (res.success && res.data?.valid) {
+              sessionStorage.setItem(SESSION_KEY, "1");
+              onAuth();
+            } else {
+              toast("Wrong password", "error");
+              setPassword("");
+            }
+          } catch (e) {
+            toast("Connection error", "error");
+          }
+          setLoading(false);
+        };
+
+        const handleSendOtp = async () => {
+          setResetLoading(true);
+          try {
+            const res = await gasGet("sendAppPasswordOtp");
+            if (res.success) {
+              setOtpSent(true);
+              toast("OTP sent to registered email", "success");
+            } else toast(res.message || "Failed to send OTP", "error");
+          } catch (e) {
+            toast("Connection error", "error");
+          }
+          setResetLoading(false);
+        };
+
+        const handleResetPassword = async () => {
+          if (!otp || !newPw) {
+            toast("Enter OTP and new password", "error");
+            return;
+          }
+          if (newPw !== confirmPw) {
+            toast("Passwords don't match", "error");
+            return;
+          }
+          if (newPw.length < 4) {
+            toast("Password must be at least 4 characters", "error");
+            return;
+          }
+          setResetLoading(true);
+          try {
+            const res = await gasGet("resetAppPassword", {
+              otp,
+              newPassword: newPw,
+            });
+            if (res.success && res.data?.reset) {
+              toast("Password reset! Please login.", "success");
+              setView("login");
+              setOtpSent(false);
+              setOtp("");
+              setNewPw("");
+              setConfirmPw("");
+            } else {
+              toast(res.data?.reason || res.message || "Reset failed", "error");
+            }
+          } catch (e) {
+            toast("Connection error", "error");
+          }
+          setResetLoading(false);
+        };
+
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "100vh",
+              background: "#F7F8FA",
+              padding: 20,
+            }}
+          >
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 360,
+                animation: "slideUp 0.3s ease",
+              }}
+            >
+              {/* Header */}
+              <div style={{ textAlign: "center", marginBottom: 28 }}>
+                <div
+                  style={{
+                    fontFamily: "'Bebas Neue',cursive",
+                    fontSize: 36,
+                    color: "#C8873A",
+                    letterSpacing: 4,
+                    lineHeight: 1,
+                  }}
+                >
+                  Pushpam
+                </div>
+                <div
+                  style={{
+                    fontFamily: "'Bebas Neue',cursive",
+                    fontSize: 18,
+                    color: "#C8873A88",
+                    letterSpacing: 6,
+                    marginBottom: 8,
+                  }}
+                >
+                  A/C BAR
+                </div>
+                <div
+                  style={{
+                    width: 36,
+                    height: 2,
+                    background: "#C8873A44",
+                    margin: "0 auto",
+                  }}
+                />
+              </div>
+
+              <div
+                style={{
+                  background: "#FFFFFF",
+                  border: "1px solid #EBEBF5",
+                  borderRadius: 18,
+                  padding: 28,
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
+                }}
+              >
+                {view === "login" ? (
+                  <>
+                    <div
+                      style={{
+                        fontFamily: "'Bebas Neue',cursive",
+                        fontSize: 20,
+                        color: "#1A1A2E",
+                        letterSpacing: 2,
+                        marginBottom: 4,
+                      }}
+                    >
+                      WELCOME BACK
+                    </div>
+                    <p
+                      style={{ fontSize: 12, color: "#888", marginBottom: 20 }}
+                    >
+                      Enter your password to continue
+                    </p>
+
+                    <div style={{ marginBottom: 16 }}>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                        placeholder="Password"
+                        style={{
+                          fontSize: 16,
+                          letterSpacing: 4,
+                          textAlign: "center",
+                        }}
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleLogin}
+                      disabled={loading || !password}
+                      style={{
+                        width: "100%",
+                        padding: "15px 0",
+                        background:
+                          loading || !password ? "#C8873A88" : "#C8873A",
+                        border: "none",
+                        borderRadius: 12,
+                        color: "#FFFFFF",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        letterSpacing: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 10,
+                      }}
+                    >
+                      {loading ? (
+                        <>
+                          <Spinner size={18} color="#FFF" /> Verifying...
+                        </>
+                      ) : (
+                        "ENTER"
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => setView("reset")}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#C8873A",
+                        fontSize: 12,
+                        width: "100%",
+                        marginTop: 16,
+                        textAlign: "center",
+                        textDecoration: "underline",
+                        padding: "4px 0",
+                      }}
+                    >
+                      Forgot password?
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setView("login");
+                        setOtpSent(false);
+                        setOtp("");
+                        setNewPw("");
+                        setConfirmPw("");
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#C8873A",
+                        fontSize: 13,
+                        marginBottom: 14,
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      ← Back
+                    </button>
+                    <div
+                      style={{
+                        fontFamily: "'Bebas Neue',cursive",
+                        fontSize: 20,
+                        color: "#1A1A2E",
+                        letterSpacing: 2,
+                        marginBottom: 4,
+                      }}
+                    >
+                      RESET PASSWORD
+                    </div>
+                    <p
+                      style={{ fontSize: 12, color: "#888", marginBottom: 20 }}
+                    >
+                      A 6-digit OTP will be sent to the registered email.
+                    </p>
+
+                    {!otpSent ? (
+                      <button
+                        onClick={handleSendOtp}
+                        disabled={resetLoading}
+                        style={{
+                          width: "100%",
+                          padding: "14px 0",
+                          background: resetLoading ? "#C8873A88" : "#C8873A",
+                          border: "none",
+                          borderRadius: 12,
+                          color: "#FFF",
+                          fontWeight: 700,
+                          fontSize: 14,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 10,
+                        }}
+                      >
+                        {resetLoading ? (
+                          <>
+                            <Spinner size={18} color="#FFF" /> Sending...
+                          </>
+                        ) : (
+                          "Send OTP to Email"
+                        )}
+                      </button>
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 12,
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: "#F0FBF0",
+                            border: "1px solid #C3E6CB",
+                            borderRadius: 10,
+                            padding: "10px 14px",
+                            fontSize: 12,
+                            color: "#27AE60",
+                          }}
+                        >
+                          ✅ OTP sent — check registered email (valid 10 min)
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          value={otp}
+                          onChange={(e) => setOtp(e.target.value)}
+                          placeholder="Enter 6-digit OTP"
+                          style={{
+                            fontSize: 16,
+                            letterSpacing: 6,
+                            textAlign: "center",
+                          }}
+                        />
+                        <input
+                          type="password"
+                          value={newPw}
+                          onChange={(e) => setNewPw(e.target.value)}
+                          placeholder="New password"
+                        />
+                        <input
+                          type="password"
+                          value={confirmPw}
+                          onChange={(e) => setConfirmPw(e.target.value)}
+                          placeholder="Confirm new password"
+                        />
+                        <button
+                          onClick={handleResetPassword}
+                          disabled={resetLoading}
+                          style={{
+                            width: "100%",
+                            padding: "14px 0",
+                            background: resetLoading ? "#C8873A88" : "#C8873A",
+                            border: "none",
+                            borderRadius: 12,
+                            color: "#FFF",
+                            fontWeight: 700,
+                            fontSize: 14,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 10,
+                          }}
+                        >
+                          {resetLoading ? (
+                            <>
+                              <Spinner size={18} color="#FFF" /> Resetting...
+                            </>
+                          ) : (
+                            "Reset Password"
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <p
+                style={{
+                  textAlign: "center",
+                  fontSize: 11,
+                  color: "#aaa",
+                  marginTop: 16,
+                }}
+              >
+                Pushpam A/C Bar POS · Secured
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      // ── SHARED UI ─────────────────────────────────────────────────
+      function Modal({ title, children, onClose }) {
+        return (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(26,26,46,0.6)",
+              zIndex: 1000,
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+            }}
+          >
+            <div
+              style={{
+                background: "#FFFFFF",
+                borderRadius: "20px 20px 0 0",
+                padding: "24px 20px 32px",
+                width: "100%",
+                maxWidth: 560,
+                maxHeight: "92vh",
+                overflowY: "auto",
+                animation: "slideUp 0.25s ease",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 20,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: "'Bebas Neue',cursive",
+                    fontSize: 20,
+                    color: "#1A1A2E",
+                    letterSpacing: 1,
+                  }}
+                >
+                  {title}
+                </div>
+                <button
+                  onClick={onClose}
+                  style={{
+                    background: "#F0F0F5",
+                    border: "none",
+                    color: "#666",
+                    width: 36,
+                    height: 36,
+                    borderRadius: "50%",
+                    fontSize: 20,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              {children}
+            </div>
+          </div>
+        );
+      }
+      function Card({ children, style = {} }) {
+        return (
+          <div
+            style={{
+              background: "#FFFFFF",
+              borderRadius: 14,
+              border: "1px solid #EBEBF5",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+              ...style,
+            }}
+          >
+            {children}
+          </div>
+        );
+      }
+      function SectionTitle({ children }) {
+        return (
+          <div
+            style={{
+              fontFamily: "'Bebas Neue',cursive",
+              fontSize: 22,
+              color: "#1A1A2E",
+              letterSpacing: 2,
+              marginBottom: 14,
+            }}
+          >
+            {children}
+          </div>
+        );
+      }
+      function Label({ children }) {
+        return (
+          <div
+            style={{
+              fontSize: 11,
+              color: "#888",
+              marginBottom: 5,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+              fontWeight: 600,
+            }}
+          >
+            {children}
+          </div>
+        );
+      }
+      function Btn({
+        children,
+        onClick,
+        variant = "primary",
+        disabled,
+        style = {},
+      }) {
+        const styles = {
+          primary: { background: "#C8873A", color: "#FFFFFF", border: "none" },
+          secondary: {
+            background: "#F0F0F5",
+            color: "#1A1A2E",
+            border: "none",
+          },
+          danger: {
+            background: "transparent",
+            color: "#E74C3C",
+            border: "1px solid #F5C0BB",
+          },
+          green: { background: "#27AE60", color: "#FFFFFF", border: "none" },
+        };
+        return (
+          <button
+            onClick={onClick}
+            disabled={disabled}
+            style={{
+              ...styles[variant],
+              borderRadius: 12,
+              padding: "13px 18px",
+              fontSize: 14,
+              fontWeight: 700,
+              opacity: disabled ? 0.5 : 1,
+              letterSpacing: 0.3,
+              ...style,
+            }}
+          >
+            {children}
+          </button>
+        );
+      }
+      function CatTabs({ cats, active, onChange }) {
+        return (
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              overflowX: "auto",
+              paddingBottom: 6,
+              paddingTop: 2,
+              WebkitOverflowScrolling: "touch",
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+              flexShrink: 0,
+            }}
+          >
+            {cats.map((c) => (
+              <button
+                key={c}
+                onClick={() => onChange(c)}
+                style={{
+                  background: active === c ? "#C8873A" : "#F0F0F5",
+                  color: active === c ? "#FFF" : "#666",
+                  border: "none",
+                  borderRadius: 20,
+                  padding: "8px 16px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                }}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        );
+      }
+
+      function LoadingScreen() {
+        return (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100vh",
+              background: "#F7F8FA",
+              gap: 16,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "'Bebas Neue',cursive",
+                fontSize: 32,
+                color: "#C8873A",
+                letterSpacing: 3,
+              }}
+            >
+              Pushpam A/C Bar
+            </div>
+            <Spinner size={28} />
+          </div>
+        );
+      }
+
+      function TopBar({ mode, setMode, barName }) {
+        return (
+          <div
+            style={{
+              background: "#FFFFFF",
+              borderBottom: "1px solid #EBEBF5",
+              padding: "0 16px",
+              height: 58,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              position: "sticky",
+              top: 0,
+              zIndex: 100,
+              boxShadow: "0 1px 8px rgba(0,0,0,0.06)",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "'Bebas Neue',cursive",
+                fontSize: 22,
+                color: "#C8873A",
+                letterSpacing: 2,
+              }}
+            >
+              {barName || "Pushpam A/C Bar"}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["server", "dashboard"].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  style={{
+                    background: mode === m ? "#C8873A" : "#F0F0F5",
+                    color: mode === m ? "#FFFFFF" : "#888",
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "9px 18px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                  }}
+                >
+                  {m === "server" ? "🍸 Order" : "📊 Mgr"}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      // ── PIN SCREEN (manager) ─────────────────────────────────────
+      function PinScreen({ onUnlock, toast }) {
+        const [pin, setPin] = useState("");
+        const [loading, setLoading] = useState(false);
+        const [forgotLoading, setForgotLoading] = useState(false);
+        const [forgotSent, setForgotSent] = useState(false);
+
+        const handleUnlock = async () => {
+          if (!pin) return;
+          setLoading(true);
+          try {
+            const res = await gasGet("verifyPin", { pin });
+            if (res.success && res.data?.valid) {
+              onUnlock();
+            } else {
+              toast("Wrong PIN", "error");
+              setPin("");
+            }
+          } catch (e) {
+            toast("Connection error", "error");
+          }
+          setLoading(false);
+        };
+        const handleForgotPin = async () => {
+          setForgotLoading(true);
+          try {
+            const res = await gasGet("sendResetPin");
+            if (res.success) {
+              setForgotSent(true);
+              toast("PIN sent to email", "success");
+            } else toast(res.message || "Could not send email", "error");
+          } catch (e) {
+            toast("Connection error", "error");
+          }
+          setForgotLoading(false);
+        };
+
+        return (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "calc(100vh - 58px)",
+              padding: 20,
+            }}
+          >
+            <Card
+              style={{
+                padding: 36,
+                width: "100%",
+                maxWidth: 340,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 40, marginBottom: 8 }}>🔐</div>
+              <div
+                style={{
+                  fontFamily: "'Bebas Neue',cursive",
+                  fontSize: 28,
+                  color: "#1A1A2E",
+                  marginBottom: 6,
+                }}
+              >
+                MANAGER ACCESS
+              </div>
+              <p style={{ color: "#888", fontSize: 13, marginBottom: 24 }}>
+                Enter your PIN to continue
+              </p>
+              <input
+                type="password"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+                placeholder="••••••"
+                maxLength={6}
+                inputMode="numeric"
+                style={{
+                  textAlign: "center",
+                  fontSize: 28,
+                  letterSpacing: 12,
+                  marginBottom: 16,
+                  background: "#F7F8FA",
+                }}
+              />
+              <Btn
+                onClick={handleUnlock}
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  padding: "16px 0",
+                  fontSize: 15,
+                  marginBottom: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                }}
+              >
+                {loading ? (
+                  <>
+                    <Spinner size={18} color="#FFF" /> Verifying...
+                  </>
+                ) : (
+                  "UNLOCK"
+                )}
+              </Btn>
+              {!forgotSent ? (
+                <button
+                  onClick={handleForgotPin}
+                  disabled={forgotLoading}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#C8873A",
+                    fontSize: 13,
+                    textDecoration: "underline",
+                    padding: 0,
+                    opacity: forgotLoading ? 0.5 : 1,
+                  }}
+                >
+                  {forgotLoading ? "Sending..." : "Forgot PIN? Email it to me"}
+                </button>
+              ) : (
+                <div
+                  style={{
+                    color: "#27AE60",
+                    fontSize: 12,
+                    padding: "8px 12px",
+                    background: "#F0FBF0",
+                    borderRadius: 8,
+                  }}
+                >
+                  ✅ PIN sent to registered email
+                </div>
+              )}
+            </Card>
+          </div>
+        );
+      }
+
+      // ── MENU ITEM CARD ───────────────────────────────────────────
+      function MenuItemCard({ item, onAdd, settings }) {
+        const [qty, setQty] = useState(1);
+        const [unit, setUnit] = useState(
+          LIQUOR_CATS.includes(item.category) ? "small" : "bottle",
+        );
+        const [imgError, setImgError] = useState(false);
+        const lowStock = isLowStock(item.qtyAvailable, item.lowStockThreshold);
+        const isLiquor = LIQUOR_CATS.includes(item.category);
+        const priceBottle =
+          item.priceBottle || calcBottlePrice(item.price30ml, item.mlPerBottle);
+        const price30 =
+          item.price30ml || calcPer30ml(priceBottle, item.mlPerBottle);
+        const price60 = Math.round(price30 * 2);
+        let displayPrice;
+        if (isLiquor) {
+          displayPrice =
+            unit === "small"
+              ? price30
+              : unit === "large"
+                ? price60
+                : priceBottle;
+        } else {
+          displayPrice = priceBottle;
+        }
+        const priceLabel = isLiquor
+          ? unit === "small"
+            ? "/30ml"
+            : unit === "large"
+              ? "/60ml"
+              : "/btl"
+          : "/btl";
+        const showEmoji = !item.imageUrl || imgError;
+        const catEmoji =
+          {
+            Liquor: "🥃",
+            Beer: "🍺",
+            "Soft Drinks": "🥤",
+            Cocktails: "🍹",
+            Mocktails: "🧃",
+          }[item.category] || "🍸";
+        return (
+          <Card
+            style={{
+              padding: 12,
+              border: lowStock ? "1.5px solid #F5C0BB" : "1px solid #EBEBF5",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                background: "#F7F8FA",
+                borderRadius: 8,
+                height: 72,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 30,
+                overflow: "hidden",
+                flexShrink: 0,
+              }}
+            >
+              {showEmoji ? (
+                catEmoji
+              ) : (
+                <img
+                  src={item.imageUrl}
+                  alt={item.name}
+                  onError={() => setImgError(true)}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                    padding: 4,
+                    borderRadius: 8,
+                  }}
+                />
+              )}
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  lineHeight: 1.3,
+                  color: "#1A1A2E",
+                }}
+              >
+                {item.name}
+              </div>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                {item.category}
+              </div>
+              {lowStock && (
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "#E74C3C",
+                    fontWeight: 700,
+                    marginTop: 2,
+                  }}
+                >
+                  ⚠ LOW STOCK
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: 14,
+                  color: "#C8873A",
+                  fontWeight: 700,
+                }}
+              >
+                ₹{displayPrice}
+              </span>
+              <span style={{ fontSize: 10, color: "#aaa" }}>{priceLabel}</span>
+            </div>
+            {isLiquor && (
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                style={{ fontSize: 12, padding: "7px 8px" }}
+              >
+                <option value="small">Small 30ml — ₹{price30}</option>
+                <option value="large">Large 60ml — ₹{price60}</option>
+                <option value="bottle">
+                  Bottle ({item.mlPerBottle}ml) — ₹{priceBottle}
+                </option>
+              </select>
+            )}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button
+                onClick={() => setQty((q) => Math.max(1, q - 1))}
+                style={{
+                  background: "#F0F0F5",
+                  border: "none",
+                  color: "#1A1A2E",
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  fontSize: 18,
+                  fontWeight: 700,
+                }}
+              >
+                −
+              </button>
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono',monospace",
+                  fontSize: 15,
+                  flex: 1,
+                  textAlign: "center",
+                  fontWeight: 600,
+                }}
+              >
+                {qty}
+              </span>
+              <button
+                onClick={() => setQty((q) => q + 1)}
+                style={{
+                  background: "#F0F0F5",
+                  border: "none",
+                  color: "#1A1A2E",
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  fontSize: 18,
+                  fontWeight: 700,
+                }}
+              >
+                +
+              </button>
+              <button
+                onClick={() => {
+                  onAdd(item, qty, unit);
+                  setQty(1);
+                }}
+                disabled={+item.qtyAvailable <= 0}
+                style={{
+                  background: +item.qtyAvailable <= 0 ? "#E0E0EE" : "#C8873A",
+                  border: "none",
+                  color: "#FFF",
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  minHeight: 36,
+                  cursor: +item.qtyAvailable <= 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                {+item.qtyAvailable <= 0 ? "OUT" : "ADD"}
+              </button>
+            </div>
+          </Card>
+        );
+      }
+
+      // ── RECENT BILLS ─────────────────────────────────────────────
+      function RecentBillsView({ bills, settings, onClose }) {
+        const now = Date.now();
+        const recent = bills
+          .filter((b) => {
+            try {
+              return now - new Date(b.dateTime).getTime() < 86400000;
+            } catch {
+              return false;
+            }
+          })
+          .slice()
+          .reverse();
+        return (
+          <Modal title="Recent Bills (Last 24h)" onClose={onClose}>
+            {recent.length === 0 && (
+              <div style={{ textAlign: "center", color: "#888", padding: 30 }}>
+                No bills in last 24 hours
+              </div>
+            )}
+            {recent.map((b) => (
+              <Card
+                key={b.billId}
+                style={{ marginBottom: 10, padding: "12px 14px" }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 6,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>
+                      {b.customerName || "Guest"} · Table {b.tableNumber}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888" }}>
+                      {b.dateTime}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 16,
+                      color: "#27AE60",
+                      fontWeight: 700,
+                    }}
+                  >
+                    ₹{(+b.total).toFixed(0)}
+                  </div>
+                </div>
+                <div style={{ borderTop: "1px solid #F0F0F5", paddingTop: 6 }}>
+                  {(b.items || []).map((it, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 12,
+                        color: "#555",
+                        padding: "2px 0",
+                      }}
+                    >
+                      <span>
+                        {it.name} × {it.qty} {it.unit}
+                      </span>
+                      <span>₹{(+it.lineTotal || 0).toFixed(0)}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ))}
+          </Modal>
+        );
+      }
+
+      // ── SERVER APP ────────────────────────────────────────────────
+      function ServerApp({
+        inventory,
+        orders,
+        setOrders,
+        bills,
+        setBills,
+        tables,
+        getTableStatus,
+        settings,
+        toast,
+        refreshInventory,
+      }) {
+        const [screen, setScreen] = useState("tables");
+        const [activeTable, setActiveTable] = useState(null);
+        const [customerInfo, setCustomerInfo] = useState({
+          name: "",
+          phone: "",
+        });
+        const [cart, setCart] = useState([]);
+        const [search, setSearch] = useState("");
+        const [catFilter, setCatFilter] = useState("All");
+        const [orderTab, setOrderTab] = useState("menu");
+        const [showBillConfirm, setShowBillConfirm] = useState(false);
+        const [showRecentBills, setShowRecentBills] = useState(false);
+        const [saving, setSaving] = useState(false);
+
+        const openTable = (table) => {
+          const existing = orders.filter(
+            (o) => o.tableNumber === table && o.status === "open",
+          );
+          setActiveTable(table);
+          setOrderTab("menu");
+          if (existing.length) {
+            setCustomerInfo({
+              name: existing[0].customerName || "",
+              phone: existing[0].customerPhone || "",
+            });
+            const cartMap = {};
+            existing.forEach((o) => {
+              const key = `${o.itemId}-${o.unit}`;
+              if (cartMap[key]) {
+                cartMap[key].qty += o.qty;
+                cartMap[key].lineTotal += o.lineTotal;
+              } else
+                cartMap[key] = {
+                  key,
+                  itemId: o.itemId,
+                  name: o.itemName,
+                  qty: o.qty,
+                  unit: o.unit,
+                  unitPrice: o.unitPrice,
+                  lineTotal: o.lineTotal,
+                  category: o.category,
+                };
+            });
+            setCart(Object.values(cartMap));
+          } else {
+            setCustomerInfo({ name: "", phone: "" });
+            setCart([]);
+          }
+          setScreen("order");
+        };
+
+        const addToCart = (item, qty, unit) => {
+          const isLiquor = LIQUOR_CATS.includes(item.category);
+          const priceBottle =
+            item.priceBottle ||
+            calcBottlePrice(item.price30ml, item.mlPerBottle);
+          const price30 =
+            item.price30ml || calcPer30ml(priceBottle, item.mlPerBottle);
+          let price;
+          if (isLiquor) {
+            price =
+              unit === "bottle"
+                ? priceBottle
+                : price30 * (unit === "small" ? 1 : 2);
+          } else {
+            price = priceBottle;
+          }
+          const requestedBottles = cartLineBottles(unit, qty, item.mlPerBottle);
+          const alreadyInCart = bottlesInCart(cart, item.id);
+          const available = +item.qtyAvailable || 0;
+          if (alreadyInCart + requestedBottles > available + 1e-9) {
+            const remaining = Math.max(0, available - alreadyInCart);
+            if (remaining <= 0) toast(`${item.name} is out of stock`, "error");
+            else
+              toast(
+                `Only ${bottlesToDisplay(remaining)} of ${item.name} left in stock`,
+                "error",
+              );
+            return;
+          }
+          const key = `${item.id}-${unit}`;
+          setCart((prev) => {
+            const ex = prev.find((c) => c.key === key);
+            if (ex)
+              return prev.map((c) =>
+                c.key === key
+                  ? { ...c, qty: c.qty + qty, lineTotal: (c.qty + qty) * price }
+                  : c,
+              );
+            return [
+              ...prev,
+              {
+                key,
+                itemId: item.id,
+                name: item.name,
+                qty,
+                unit,
+                unitPrice: price,
+                lineTotal: price * qty,
+                category: item.category,
+                mlPerBottle: item.mlPerBottle,
+              },
+            ];
+          });
+          toast(`${item.name} ×${qty} added`, "success");
+        };
+
+        const removeFromCart = (key) =>
+          setCart((p) => p.filter((c) => c.key !== key));
+        const updateCartQty = (key, delta) =>
+          setCart((prev) => {
+            const line = prev.find((c) => c.key === key);
+            if (!line) return prev;
+            const newQty = Math.max(1, line.qty + delta);
+            if (delta > 0) {
+              const invItem = inventory.find((i) => i.id === line.itemId);
+              const available = +invItem?.qtyAvailable || 0;
+              const otherLinesBottles = bottlesInCart(
+                prev.filter((c) => c.key !== key),
+                line.itemId,
+              );
+              const newLineBottles = cartLineBottles(
+                line.unit,
+                newQty,
+                line.mlPerBottle || 750,
+              );
+              if (otherLinesBottles + newLineBottles > available + 1e-9) {
+                toast(
+                  `Only ${bottlesToDisplay(available)} of ${line.name} in stock`,
+                  "error",
+                );
+                return prev;
+              }
+            }
+            return prev.map((c) =>
+              c.key === key
+                ? { ...c, qty: newQty, lineTotal: newQty * c.unitPrice }
+                : c,
+            );
+          });
+
+        const rawSubtotal = cart.reduce((a, c) => a + c.lineTotal, 0);
+        const { subtotal, gstAmount, total } = calcTotals(
+          rawSubtotal,
+          settings,
+        );
+
+        const buildOrderRows = (info) =>
+          cart.map((c) => ({
+            orderId: `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
+            tableNumber: activeTable,
+            customerName: info ? info.name || "" : customerInfo.name || "",
+            customerPhone: info ? info.phone || "" : customerInfo.phone || "",
+            itemId: c.itemId,
+            itemName: c.name,
+            qty: c.qty,
+            unit: c.unit,
+            unitPrice: c.unitPrice,
+            lineTotal: c.lineTotal,
+            category: c.category,
+            status: "open",
+            date: new Date().toLocaleDateString("en-IN"),
+            time: new Date().toLocaleTimeString("en-IN"),
+          }));
+
+        const saveOccupied = async () => {
+          if (!cart.length) return;
+          setSaving(true);
+          const newOrders = buildOrderRows();
+          try {
+            await gasGet("saveOrder", {
+              tableNumber: activeTable,
+              orders: newOrders,
+            });
+            setOrders((p) => [
+              ...p.filter(
+                (o) => !(o.tableNumber === activeTable && o.status === "open"),
+              ),
+              ...newOrders,
+            ]);
+            toast("Table marked occupied!", "success");
+            await refreshInventory();
+          } catch (e) {
+            toast("Save failed", "error");
+          }
+          setSaving(false);
+          setScreen("tables");
+        };
+
+        const generateBill = async (billCustomerInfo) => {
+          if (!cart.length) return;
+          setSaving(true);
+          const billId = `BILL-${Date.now()}`;
+          const bill = {
+            billId,
+            tableNumber: activeTable,
+            customerName: billCustomerInfo.name || "",
+            customerPhone: billCustomerInfo.phone || "",
+            subtotal,
+            gstAmount,
+            total,
+            dateTime: new Date().toLocaleString("en-IN"),
+            items: cart.map((c) => ({
+              name: c.name,
+              qty: c.qty,
+              unit: c.unit,
+              rate: c.unitPrice,
+              lineTotal: c.lineTotal,
+              itemId: c.itemId,
+              category: c.category,
+            })),
+          };
+          try {
+            const orderRowsWithCustomer = buildOrderRows(billCustomerInfo);
+            await gasGet("saveOrder", {
+              tableNumber: activeTable,
+              orders: orderRowsWithCustomer,
+            });
+            await gasGet("saveBill", bill);
+            await gasGet("updateOrderStatus", {
+              tableNumber: activeTable,
+              newStatus: "billed",
+            });
+            setBills((p) => [...p, bill]);
+            setOrders((p) =>
+              p.map((o) =>
+                o.tableNumber === activeTable ? { ...o, status: "billed" } : o,
+              ),
+            );
+            printBill(bill, settings);
+            await refreshInventory();
+            toast("Bill generated — printing!", "success");
+          } catch (e) {
+            toast("Bill save failed", "error");
+          }
+          setSaving(false);
+          setShowBillConfirm(false);
+          setScreen("tables");
+        };
+
+        const inventoryCats = ["All", ...CATEGORIES.slice(1)];
+        const filtered = inventory.filter(
+          (i) =>
+            i.active &&
+            (catFilter === "All" || i.category === catFilter) &&
+            (i.name.toLowerCase().includes(search.toLowerCase()) ||
+              i.category.toLowerCase().includes(search.toLowerCase())),
+        );
+
+        if (screen === "tables")
+          return (
+            <div style={{ padding: "14px", maxWidth: 800, margin: "0 auto" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 14,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: "'Bebas Neue',cursive",
+                    fontSize: 26,
+                    color: "#1A1A2E",
+                    letterSpacing: 2,
+                  }}
+                >
+                  TABLES
+                </div>
+                <button
+                  onClick={() => setShowRecentBills(true)}
+                  style={{
+                    background: "#1A1A2E",
+                    color: "#C8873A",
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "9px 14px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  🧾 Recent Bills
+                </button>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill,minmax(130px,1fr))",
+                  gap: 10,
+                }}
+              >
+                {tables.map((t) => {
+                  const status = getTableStatus(t);
+                  const cfg = {
+                    free: {
+                      bg: "#F0FBF0",
+                      border: "#27AE60",
+                      text: "#27AE60",
+                      label: "FREE",
+                    },
+                    occupied: {
+                      bg: "#FFF8F0",
+                      border: "#C8873A",
+                      text: "#C8873A",
+                      label: "BUSY",
+                    },
+                    billed: {
+                      bg: "#FFF0F0",
+                      border: "#E74C3C",
+                      text: "#E74C3C",
+                      label: "BILLED",
+                    },
+                  }[status];
+                  return (
+                    <div
+                      key={t}
+                      onClick={() => openTable(t)}
+                      style={{
+                        background: cfg.bg,
+                        border: `2px solid ${cfg.border}`,
+                        borderRadius: 14,
+                        padding: "22px 12px",
+                        textAlign: "center",
+                        cursor: "pointer",
+                        userSelect: "none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "'Bebas Neue',cursive",
+                          fontSize: 36,
+                          color: cfg.text,
+                        }}
+                      >
+                        {t}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: cfg.text,
+                          letterSpacing: 2,
+                          marginTop: 2,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {cfg.label}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {showRecentBills && (
+                <RecentBillsView
+                  bills={bills}
+                  settings={settings}
+                  onClose={() => setShowRecentBills(false)}
+                />
+              )}
+            </div>
+          );
+
+        return (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              height: "calc(100vh - 58px)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                background: "#FFFFFF",
+                padding: "8px 12px",
+                borderBottom: "1px solid #EBEBF5",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexShrink: 0,
+              }}
+            >
+              <button
+                onClick={() => setScreen("tables")}
+                style={{
+                  background: "#F0F0F5",
+                  border: "none",
+                  color: "#1A1A2E",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  minHeight: 44,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                ← Back
+              </button>
+              <div
+                style={{
+                  fontFamily: "'Bebas Neue',cursive",
+                  fontSize: 20,
+                  color: "#C8873A",
+                  letterSpacing: 2,
+                  flex: 1,
+                }}
+              >
+                TABLE {activeTable}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["menu", "cart"].map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setOrderTab(tab)}
+                    style={{
+                      background:
+                        tab === "menu"
+                          ? orderTab === tab
+                            ? "#C8873A"
+                            : "#F0F0F5"
+                          : orderTab === tab
+                            ? "#1A1A2E"
+                            : "#F0F0F5",
+                      color:
+                        tab === "menu"
+                          ? orderTab === tab
+                            ? "#FFF"
+                            : "#1A1A2E"
+                          : orderTab === tab
+                            ? "#C8873A"
+                            : "#1A1A2E",
+                      border: "none",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      minHeight: 44,
+                      position: "relative",
+                    }}
+                  >
+                    {tab === "cart" ? "Cart" : "Menu"}
+                    {tab === "cart" && cart.length > 0 && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 5,
+                          right: 5,
+                          background: "#E74C3C",
+                          color: "#FFF",
+                          borderRadius: "50%",
+                          width: 16,
+                          height: 16,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        {cart.reduce((a, c) => a + c.qty, 0)}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {orderTab === "menu" && (
+              <div
+                style={{
+                  flex: 1,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <div
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 10,
+                    background: "#F7F8FA",
+                    padding: "10px 10px 6px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    borderBottom: "1px solid #EBEBF5",
+                  }}
+                >
+                  <input
+                    placeholder="🔍 Search items..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    style={{ background: "#FFFFFF" }}
+                  />
+                  <CatTabs
+                    cats={inventoryCats}
+                    active={catFilter}
+                    onChange={setCatFilter}
+                  />
+                </div>
+                <div style={{ padding: "10px 10px 80px" }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fill,minmax(155px,1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {filtered.map((item) => (
+                      <MenuItemCard
+                        key={item.id}
+                        item={item}
+                        onAdd={addToCart}
+                        settings={settings}
+                      />
+                    ))}
+                    {!filtered.length && (
+                      <div
+                        style={{
+                          gridColumn: "1/-1",
+                          textAlign: "center",
+                          color: "#888",
+                          padding: 30,
+                          fontSize: 13,
+                        }}
+                      >
+                        No items found
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {orderTab === "cart" && (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}
+                >
+                  {cart.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: 48 }}>
+                      <div style={{ fontSize: 48, marginBottom: 8 }}>🛒</div>
+                      <div style={{ color: "#888", fontSize: 14 }}>
+                        Cart is empty
+                      </div>
+                      <button
+                        onClick={() => setOrderTab("menu")}
+                        style={{
+                          marginTop: 16,
+                          background: "#C8873A",
+                          border: "none",
+                          color: "#FFF",
+                          borderRadius: 10,
+                          padding: "12px 24px",
+                          fontSize: 14,
+                          fontWeight: 700,
+                        }}
+                      >
+                        Browse Menu →
+                      </button>
+                    </div>
+                  ) : (
+                    cart.map((c) => (
+                      <div
+                        key={c.key}
+                        style={{
+                          padding: "12px 0",
+                          borderBottom: "1px solid #F0F0F5",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            marginBottom: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 600,
+                              flex: 1,
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            {c.name}
+                          </div>
+                          <button
+                            onClick={() => removeFromCart(c.key)}
+                            style={{
+                              background: "#FFF0F0",
+                              border: "none",
+                              color: "#E74C3C",
+                              fontSize: 16,
+                              width: 30,
+                              height: 30,
+                              borderRadius: 8,
+                              marginLeft: 8,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: 700,
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#888",
+                            marginBottom: 8,
+                          }}
+                        >
+                          {c.unit} · ₹{c.unitPrice} each
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              background: "#F7F8FA",
+                              borderRadius: 10,
+                              padding: "4px 6px",
+                            }}
+                          >
+                            <button
+                              onClick={() => updateCartQty(c.key, -1)}
+                              style={{
+                                background: "#FFF",
+                                border: "none",
+                                width: 34,
+                                height: 34,
+                                borderRadius: 8,
+                                fontSize: 18,
+                                fontWeight: 700,
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                              }}
+                            >
+                              −
+                            </button>
+                            <span
+                              style={{
+                                fontFamily: "'JetBrains Mono',monospace",
+                                fontSize: 16,
+                                fontWeight: 700,
+                                minWidth: 28,
+                                textAlign: "center",
+                              }}
+                            >
+                              {c.qty}
+                            </span>
+                            <button
+                              onClick={() => updateCartQty(c.key, 1)}
+                              style={{
+                                background: "#FFF",
+                                border: "none",
+                                width: 34,
+                                height: 34,
+                                borderRadius: 8,
+                                fontSize: 18,
+                                fontWeight: 700,
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                          <span
+                            style={{
+                              fontFamily: "'JetBrains Mono',monospace",
+                              fontSize: 16,
+                              color: "#C8873A",
+                              fontWeight: 700,
+                            }}
+                          >
+                            ₹{c.lineTotal.toFixed(0)}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {cart.length > 0 && (
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      borderTop: "1px solid #EBEBF5",
+                      background: "#FFFFFF",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 12,
+                        color: "#888",
+                        marginBottom: 3,
+                      }}
+                    >
+                      <span>Subtotal</span>
+                      <span>₹{subtotal.toFixed(0)}</span>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 12,
+                        color: "#888",
+                        marginBottom: 10,
+                      }}
+                    >
+                      <span>
+                        GST {settings.gstRate || 18}%
+                        {settings.gstInclusive ? " (incl.)" : ""}
+                      </span>
+                      <span>₹{gstAmount.toFixed(0)}</span>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color: "#1A1A2E",
+                        marginBottom: 14,
+                      }}
+                    >
+                      <span>TOTAL</span>
+                      <span
+                        style={{
+                          fontFamily: "'JetBrains Mono',monospace",
+                          color: "#C8873A",
+                        }}
+                      >
+                        ₹{total.toFixed(0)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={saveOccupied}
+                        disabled={saving}
+                        style={{
+                          flex: 1,
+                          padding: "15px 0",
+                          background: "#F0F0F5",
+                          border: "none",
+                          borderRadius: 12,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "#1A1A2E",
+                          opacity: saving ? 0.5 : 1,
+                        }}
+                      >
+                        🪑 OCCUPIED
+                      </button>
+                      <button
+                        onClick={() => setShowBillConfirm(true)}
+                        disabled={saving}
+                        style={{
+                          flex: 2,
+                          padding: "15px 0",
+                          background: "#C8873A",
+                          border: "none",
+                          borderRadius: 12,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "#FFF",
+                          opacity: saving ? 0.5 : 1,
+                        }}
+                      >
+                        🧾 BILL
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showBillConfirm && (
+              <BillConfirmModal
+                activeTable={activeTable}
+                total={total}
+                saving={saving}
+                initialCustomer={customerInfo}
+                onClose={() => setShowBillConfirm(false)}
+                onConfirm={generateBill}
+              />
+            )}
+          </div>
+        );
+      }
+
+      function BillConfirmModal({
+        activeTable,
+        total,
+        saving,
+        initialCustomer,
+        onClose,
+        onConfirm,
+      }) {
+        const [name, setName] = useState(initialCustomer.name || "");
+        const [phone, setPhone] = useState(initialCustomer.phone || "");
+        return (
+          <Modal title="Generate Bill?" onClose={onClose}>
+            <div
+              style={{
+                background: "#F7F8FA",
+                borderRadius: 12,
+                padding: "14px 14px 10px",
+                marginBottom: 16,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#888",
+                  fontWeight: 700,
+                  letterSpacing: 0.5,
+                  textTransform: "uppercase",
+                  marginBottom: 10,
+                }}
+              >
+                Customer Info{" "}
+                <span style={{ fontSize: 10, fontWeight: 400, color: "#bbb" }}>
+                  (optional)
+                </span>
+              </div>
+              <div style={{ marginBottom: 10 }}>
+                <Label>Name</Label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Arjun Kumar"
+                  style={{ background: "#FFFFFF" }}
+                />
+              </div>
+              <div>
+                <Label>Mobile</Label>
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="9876543210"
+                  inputMode="tel"
+                  style={{ background: "#FFFFFF" }}
+                />
+              </div>
+            </div>
+            <p style={{ color: "#888", fontSize: 13, marginBottom: 6 }}>
+              Table {activeTable} · {name || "Guest"}
+            </p>
+            <div
+              style={{
+                fontFamily: "'JetBrains Mono',monospace",
+                fontSize: 32,
+                fontWeight: 700,
+                color: "#C8873A",
+                marginBottom: 20,
+              }}
+            >
+              ₹{total.toFixed(0)}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn
+                variant="secondary"
+                onClick={onClose}
+                style={{ flex: 1, padding: "15px 0", fontSize: 14 }}
+              >
+                Cancel
+              </Btn>
+              <Btn
+                onClick={() => onConfirm({ name, phone })}
+                disabled={saving}
+                style={{ flex: 2, padding: "15px 0", fontSize: 14 }}
+              >
+                {saving ? "Saving..." : "🖨️ Print Bill"}
+              </Btn>
+            </div>
+          </Modal>
+        );
+      }
+
+      // ── DASHBOARD TABS (Overview, Inventory, Tables, Reports, Settings) ──
+      function OverviewTab({ orders, bills, inventory }) {
+        const todayStr = new Date().toLocaleDateString("en-IN");
+        const todayBills = bills.filter((b) => b.dateTime?.includes(todayStr));
+        const todayRevenue = todayBills.reduce(
+          (a, b) => a + (+b.total || 0),
+          0,
+        );
+        const uniqueOpen = [
+          ...new Set(
+            orders.filter((o) => o.status === "open").map((o) => o.tableNumber),
+          ),
+        ].length;
+        const lowStock = inventory.filter(
+          (i) => i.active && isLowStock(i.qtyAvailable, i.lowStockThreshold),
+        ).length;
+        const stats = [
+          {
+            label: "Today's Revenue",
+            value: `₹${todayRevenue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`,
+            color: "#C8873A",
+          },
+          { label: "Bills Today", value: todayBills.length, color: "#27AE60" },
+          { label: "Open Tables", value: uniqueOpen, color: "#2980B9" },
+          {
+            label: "Low Stock Items",
+            value: lowStock,
+            color: lowStock > 0 ? "#E74C3C" : "#27AE60",
+          },
+        ];
+        return (
+          <div>
+            <SectionTitle>Overview</SectionTitle>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 10,
+                marginBottom: 24,
+              }}
+            >
+              {stats.map((s) => (
+                <Card key={s.label} style={{ padding: "14px 16px" }}>
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+                    {s.label}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 22,
+                      fontWeight: 700,
+                      color: s.color,
+                    }}
+                  >
+                    {s.value}
+                  </div>
+                </Card>
+              ))}
+            </div>
+            <SectionTitle>Recent Bills</SectionTitle>
+            <Card>
+              {bills.length === 0 && (
+                <div
+                  style={{
+                    padding: 20,
+                    textAlign: "center",
+                    color: "#888",
+                    fontSize: 13,
+                  }}
+                >
+                  No bills yet
+                </div>
+              )}
+              {bills
+                .slice(-10)
+                .reverse()
+                .map((b, i) => (
+                  <div
+                    key={b.billId}
+                    style={{
+                      padding: "12px 16px",
+                      borderBottom: i < 9 ? "1px solid #F0F0F5" : "none",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600 }}>
+                        {b.customerName || "Guest"} · T{b.tableNumber}
+                      </div>
+                      <div
+                        style={{ fontSize: 11, color: "#888", marginTop: 2 }}
+                      >
+                        {b.dateTime?.split(",")[0]}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "'JetBrains Mono',monospace",
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: "#27AE60",
+                      }}
+                    >
+                      ₹{(+b.total || 0).toFixed(0)}
+                    </div>
+                  </div>
+                ))}
+            </Card>
+          </div>
+        );
+      }
+
+      const BLANK_ROW = () => ({
+        name: "",
+        category: "Liquor",
+        price30ml: "",
+        priceBottle: "",
+        mlPerBottle: 750,
+        qtyAvailable: 1,
+        lowStockThreshold: 2,
+        imageFile: null,
+        imgPreview: null,
+      });
+
+      function InventoryTab({ inventory, setInventory, settings, toast }) {
+        const [showAdd, setShowAdd] = useState(false);
+        const [editItem, setEditItem] = useState(null);
+        const [catFilter, setCatFilter] = useState("All");
+        const [rows, setRows] = useState([BLANK_ROW()]);
+        const [saving, setSaving] = useState(false);
+
+        const openAdd = () => {
+          setEditItem(null);
+          setRows([BLANK_ROW()]);
+          setShowAdd(true);
+        };
+        const openEdit = (item) => {
+          setEditItem(item);
+          setRows([
+            {
+              name: item.name,
+              category: item.category,
+              price30ml: item.price30ml,
+              priceBottle: item.priceBottle,
+              mlPerBottle: item.mlPerBottle,
+              qtyAvailable: item.qtyAvailable,
+              lowStockThreshold: item.lowStockThreshold,
+              imageFile: null,
+              imgPreview: item.imageUrl || null,
+            },
+          ]);
+          setShowAdd(true);
+        };
+        const updateRow = (i, key, val) =>
+          setRows((prev) =>
+            prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)),
+          );
+        const addRow = () => setRows((prev) => [...prev, BLANK_ROW()]);
+        const removeRow = (i) =>
+          setRows((prev) => prev.filter((_, idx) => idx !== i));
+        const handleImagePick = (i, e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => updateRow(i, "imgPreview", ev.target.result);
+          reader.readAsDataURL(file);
+          updateRow(i, "imageFile", file);
+        };
+        const handlePrice30Change = (i, val) => {
+          updateRow(i, "price30ml", val);
+          const row = rows[i];
+          if (val && row.mlPerBottle)
+            updateRow(i, "priceBottle", calcBottlePrice(val, row.mlPerBottle));
+        };
+        const handlePriceBottleChange = (i, val) => {
+          updateRow(i, "priceBottle", val);
+          const row = rows[i];
+          if (val && row.mlPerBottle && LIQUOR_CATS.includes(row.category))
+            updateRow(i, "price30ml", calcPer30ml(val, row.mlPerBottle));
+        };
+        const handleMlPerBottleChange = (i, val) => {
+          const row = rows[i];
+          updateRow(i, "mlPerBottle", val);
+          if (row.price30ml && val)
+            updateRow(i, "priceBottle", calcBottlePrice(row.price30ml, val));
+        };
+
+        const saveItems = async () => {
+          if (rows.some((r) => !r.name.trim())) {
+            toast("All item names required", "error");
+            return;
+          }
+          setSaving(true);
+          try {
+            if (editItem) {
+              const row = rows[0];
+              let imageUrl = editItem.imageUrl || "";
+              if (row.imageFile) {
+                try {
+                  imageUrl = await uploadToGithub(
+                    row.imageFile,
+                    editItem.id,
+                    settings,
+                  );
+                } catch {
+                  toast("Image upload failed", "info");
+                }
+              }
+              const payload = {
+                id: editItem.id,
+                name: row.name.trim(),
+                category: row.category,
+                price30ml: +row.price30ml,
+                priceBottle: +row.priceBottle,
+                mlPerBottle: +row.mlPerBottle || 750,
+                qtyAvailable: +row.qtyAvailable,
+                lowStockThreshold: +row.lowStockThreshold,
+                imageUrl,
+              };
+              await gasGet("updateInventoryItem", payload);
+              setInventory((p) =>
+                p.map((i) => (i.id === editItem.id ? { ...i, ...payload } : i)),
+              );
+              toast("Item updated!", "success");
+            } else {
+              const normalize = (s) =>
+                String(s || "")
+                  .trim()
+                  .toLowerCase();
+              const existingByName = {};
+              inventory.forEach((i) => {
+                if (i.active) existingByName[normalize(i.name)] = i;
+              });
+              const decisions = [];
+              for (const row of rows) {
+                const match = existingByName[normalize(row.name)];
+                if (match) {
+                  const mergeStock = confirm(
+                    `"${row.name.trim()}" already exists.\n\nOK = Update + combine stock\nCancel = Skip`,
+                  );
+                  if (mergeStock)
+                    decisions.push({ row, mode: "merge", mergeTarget: match });
+                  else decisions.push({ row, mode: "skip" });
+                } else decisions.push({ row, mode: "new" });
+              }
+              const toCreate = decisions.filter((d) => d.mode === "new");
+              const toMerge = decisions.filter((d) => d.mode === "merge");
+              const skipped = decisions.filter((d) => d.mode === "skip").length;
+              const createResults = await Promise.all(
+                toCreate.map(async ({ row }) => {
+                  let imageUrl = "";
+                  if (row.imageFile) {
+                    const tempId = `TMP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                    try {
+                      imageUrl = await uploadToGithub(
+                        row.imageFile,
+                        tempId,
+                        settings,
+                      );
+                    } catch {
+                      toast(`Image for ${row.name} failed`, "info");
+                    }
+                  }
+                  const payload = {
+                    name: row.name.trim(),
+                    category: row.category,
+                    price30ml: +row.price30ml,
+                    priceBottle: +row.priceBottle,
+                    mlPerBottle: +row.mlPerBottle || 750,
+                    qtyAvailable: +row.qtyAvailable || 1,
+                    lowStockThreshold: +row.lowStockThreshold || 2,
+                    imageUrl,
+                    forceNew: true,
+                  };
+                  const res = await gasGet("addInventoryItem", payload);
+                  const newId = res.data?.id || `LOCAL-${Date.now()}`;
+                  return { id: newId, ...payload, active: true };
+                }),
+              );
+              if (createResults.length)
+                setInventory((p) => [...p, ...createResults]);
+              const mergeResults = await Promise.all(
+                toMerge.map(async ({ row, mergeTarget }) => {
+                  const combinedQty =
+                    (+mergeTarget.qtyAvailable || 0) + (+row.qtyAvailable || 0);
+                  let imageUrl = mergeTarget.imageUrl || "";
+                  if (row.imageFile) {
+                    try {
+                      imageUrl = await uploadToGithub(
+                        row.imageFile,
+                        mergeTarget.id,
+                        settings,
+                      );
+                    } catch {
+                      toast(`Image for ${row.name} failed`, "info");
+                    }
+                  }
+                  const payload = {
+                    id: mergeTarget.id,
+                    name: row.name.trim(),
+                    category: row.category,
+                    price30ml: +row.price30ml,
+                    priceBottle: +row.priceBottle,
+                    mlPerBottle: +row.mlPerBottle || 750,
+                    qtyAvailable: combinedQty,
+                    lowStockThreshold: +row.lowStockThreshold || 2,
+                    imageUrl,
+                    mergeIntoExisting: true,
+                  };
+                  await gasGet("updateInventoryItem", payload);
+                  return payload;
+                }),
+              );
+              if (mergeResults.length)
+                setInventory((p) =>
+                  p.map((i) => {
+                    const m = mergeResults.find((r) => r.id === i.id);
+                    return m ? { ...i, ...m } : i;
+                  }),
+                );
+              const parts = [];
+              if (createResults.length)
+                parts.push(`${createResults.length} added`);
+              if (mergeResults.length)
+                parts.push(`${mergeResults.length} merged`);
+              if (skipped) parts.push(`${skipped} skipped`);
+              toast(
+                parts.length ? parts.join(", ") : "Nothing saved",
+                "success",
+              );
+            }
+          } catch (e) {
+            toast("Save failed", "error");
+          }
+          setSaving(false);
+          setShowAdd(false);
+          setEditItem(null);
+          setRows([BLANK_ROW()]);
+        };
+
+        const deleteItem = async (id) => {
+          if (!confirm("Mark item as inactive?")) return;
+          try {
+            await gasGet("deleteInventoryItem", { id });
+            setInventory((p) =>
+              p.map((i) => (i.id === id ? { ...i, active: false } : i)),
+            );
+            toast("Item removed", "info");
+          } catch {
+            toast("Delete failed", "error");
+          }
+        };
+
+        const cats = ["All", ...CATEGORIES.slice(1)];
+        const displayed = inventory.filter(
+          (i) => i.active && (catFilter === "All" || i.category === catFilter),
+        );
+        return (
+          <div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 10,
+              }}
+            >
+              <SectionTitle>Inventory</SectionTitle>
+              <Btn onClick={openAdd} style={{ padding: "10px 18px" }}>
+                + Add Items
+              </Btn>
+            </div>
+            <CatTabs cats={cats} active={catFilter} onChange={setCatFilter} />
+            <div style={{ height: 10 }} />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))",
+                gap: 10,
+              }}
+            >
+              {displayed.map((item) => {
+                const low = isLowStock(
+                  item.qtyAvailable,
+                  item.lowStockThreshold,
+                );
+                const isLiquor = LIQUOR_CATS.includes(item.category);
+                const catEmoji =
+                  {
+                    Liquor: "🥃",
+                    Beer: "🍺",
+                    "Soft Drinks": "🥤",
+                    Cocktails: "🍹",
+                    Mocktails: "🧃",
+                  }[item.category] || "🍸";
+                return (
+                  <Card
+                    key={item.id}
+                    style={{
+                      padding: 12,
+                      border: low ? "1.5px solid #F5C0BB" : "1px solid #EBEBF5",
+                      position: "relative",
+                    }}
+                  >
+                    {low && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 8,
+                          right: 8,
+                          background: "#FFF0F0",
+                          color: "#E74C3C",
+                          fontSize: 9,
+                          padding: "2px 7px",
+                          borderRadius: 20,
+                          fontWeight: 700,
+                        }}
+                      >
+                        LOW
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        background: "#F7F8FA",
+                        borderRadius: 8,
+                        height: 70,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 30,
+                        marginBottom: 8,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.name}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            borderRadius: 8,
+                          }}
+                          onError={(e) => (e.target.style.display = "none")}
+                        />
+                      ) : (
+                        catEmoji
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "'JetBrains Mono',monospace",
+                        fontSize: 9,
+                        color: "#aaa",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {item.id}
+                    </div>
+                    <div
+                      style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}
+                    >
+                      {item.name}
+                    </div>
+                    <div
+                      style={{ fontSize: 11, color: "#888", marginBottom: 6 }}
+                    >
+                      {item.category}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                      <div
+                        style={{
+                          flex: 1,
+                          background: "#F7F8FA",
+                          borderRadius: 6,
+                          padding: "5px 8px",
+                          fontSize: 10,
+                        }}
+                      >
+                        <div style={{ color: "#888" }}>
+                          {isLiquor ? "30ml" : "Price"}
+                        </div>
+                        <div
+                          style={{
+                            color: "#C8873A",
+                            fontFamily: "'JetBrains Mono',monospace",
+                            fontWeight: 600,
+                          }}
+                        >
+                          ₹{isLiquor ? item.price30ml : item.priceBottle}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          flex: 1,
+                          background: low ? "#FFF0F0" : "#F7F8FA",
+                          borderRadius: 6,
+                          padding: "5px 8px",
+                          fontSize: 10,
+                        }}
+                      >
+                        <div style={{ color: "#888" }}>Stock</div>
+                        <div
+                          style={{
+                            color: low ? "#E74C3C" : "#27AE60",
+                            fontFamily: "'JetBrains Mono',monospace",
+                            fontWeight: 600,
+                            fontSize: 10,
+                          }}
+                        >
+                          {bottlesToDisplay(item.qtyAvailable)}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn
+                        variant="secondary"
+                        onClick={() => openEdit(item)}
+                        style={{ flex: 1, padding: "9px 0", fontSize: 12 }}
+                      >
+                        Edit
+                      </Btn>
+                      <Btn
+                        variant="danger"
+                        onClick={() => deleteItem(item.id)}
+                        style={{ padding: "9px 10px", fontSize: 12 }}
+                      >
+                        ✕
+                      </Btn>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+            {showAdd && (
+              <Modal
+                title={editItem ? `Edit Item` : `Add Items (${rows.length})`}
+                onClose={() => {
+                  setShowAdd(false);
+                  setEditItem(null);
+                  setRows([BLANK_ROW()]);
+                }}
+              >
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 16 }}
+                >
+                  {rows.map((row, i) => {
+                    const isLiquorRow = LIQUOR_CATS.includes(row.category);
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          border: "1px solid #EBEBF5",
+                          borderRadius: 12,
+                          padding: 14,
+                          position: "relative",
+                        }}
+                      >
+                        {!editItem && rows.length > 1 && (
+                          <button
+                            onClick={() => removeRow(i)}
+                            style={{
+                              position: "absolute",
+                              top: 8,
+                              right: 8,
+                              background: "#FFF0F0",
+                              border: "none",
+                              color: "#E74C3C",
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              fontSize: 14,
+                              fontWeight: 700,
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ gridColumn: "1/-1" }}>
+                            <Label>Item Name</Label>
+                            <input
+                              value={row.name}
+                              onChange={(e) =>
+                                updateRow(i, "name", e.target.value)
+                              }
+                              placeholder="e.g. Jack Daniel's"
+                            />
+                          </div>
+                          <div>
+                            <Label>Category</Label>
+                            <select
+                              value={row.category}
+                              onChange={(e) =>
+                                updateRow(i, "category", e.target.value)
+                              }
+                            >
+                              {CATEGORIES.slice(1).map((c) => (
+                                <option key={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <Label>ML / Bottle</Label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              value={row.mlPerBottle}
+                              onChange={(e) =>
+                                handleMlPerBottleChange(i, e.target.value)
+                              }
+                            />
+                          </div>
+                          {isLiquorRow && (
+                            <div>
+                              <Label>Price / 30ml (₹)</Label>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                value={row.price30ml}
+                                onChange={(e) =>
+                                  handlePrice30Change(i, e.target.value)
+                                }
+                              />
+                            </div>
+                          )}
+                          <div
+                            style={isLiquorRow ? {} : { gridColumn: "1/-1" }}
+                          >
+                            <Label>
+                              {isLiquorRow ? (
+                                <>
+                                  Price / Bottle (₹){" "}
+                                  <span
+                                    style={{
+                                      color: "#888",
+                                      fontSize: 10,
+                                      fontWeight: 400,
+                                    }}
+                                  >
+                                    auto-filled
+                                  </span>
+                                </>
+                              ) : (
+                                "Price (₹)"
+                              )}
+                            </Label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              value={row.priceBottle}
+                              onChange={(e) =>
+                                handlePriceBottleChange(i, e.target.value)
+                              }
+                            />
+                          </div>
+                          <div>
+                            <Label>Number of Bottles</Label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              value={row.qtyAvailable}
+                              min="0"
+                              step="1"
+                              onChange={(e) =>
+                                updateRow(i, "qtyAvailable", e.target.value)
+                              }
+                              placeholder="e.g. 5"
+                            />
+                          </div>
+                          <div>
+                            <Label>Low Alert (Bottles)</Label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              value={row.lowStockThreshold}
+                              min="1"
+                              step="1"
+                              onChange={(e) =>
+                                updateRow(
+                                  i,
+                                  "lowStockThreshold",
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="e.g. 2"
+                            />
+                          </div>
+                          <div style={{ gridColumn: "1/-1" }}>
+                            <Label>
+                              Item Image{" "}
+                              {!settings.githubOwner && (
+                                <span
+                                  style={{ color: "#E74C3C", fontSize: 10 }}
+                                >
+                                  (configure GitHub in Settings)
+                                </span>
+                              )}
+                            </Label>
+                            {row.imgPreview && (
+                              <div
+                                style={{
+                                  marginBottom: 8,
+                                  borderRadius: 8,
+                                  overflow: "hidden",
+                                  height: 70,
+                                  background: "#F7F8FA",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                <img
+                                  src={row.imgPreview}
+                                  alt="preview"
+                                  style={{
+                                    height: "100%",
+                                    objectFit: "contain",
+                                  }}
+                                />
+                              </div>
+                            )}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleImagePick(i, e)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!editItem && (
+                  <button
+                    onClick={addRow}
+                    style={{
+                      width: "100%",
+                      marginTop: 10,
+                      padding: "10px 0",
+                      background: "#F0F0F5",
+                      border: "1px dashed #CCC",
+                      borderRadius: 10,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#666",
+                    }}
+                  >
+                    + Add Another Item
+                  </button>
+                )}
+                <Btn
+                  onClick={saveItems}
+                  disabled={saving}
+                  style={{
+                    width: "100%",
+                    padding: "15px 0",
+                    fontSize: 14,
+                    marginTop: 14,
+                  }}
+                >
+                  {saving
+                    ? "Saving..."
+                    : editItem
+                      ? "Save Changes"
+                      : `Save ${rows.length} Item${rows.length > 1 ? "s" : ""}`}
+                </Btn>
+              </Modal>
+            )}
+          </div>
+        );
+      }
+
+      function TablesTab({ tables, getTableStatus, orders }) {
+        return (
+          <div>
+            <SectionTitle>Table Status</SectionTitle>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))",
+                gap: 10,
+              }}
+            >
+              {tables.map((t) => {
+                const status = getTableStatus(t);
+                const clr = {
+                  free: "#27AE60",
+                  occupied: "#C8873A",
+                  billed: "#E74C3C",
+                }[status];
+                const tOrders = orders.filter(
+                  (o) => o.tableNumber === t && o.status === "open",
+                );
+                const running = tOrders.reduce(
+                  (a, o) => a + (+o.lineTotal || 0),
+                  0,
+                );
+                return (
+                  <Card
+                    key={t}
+                    style={{ padding: 14, border: `1.5px solid ${clr}33` }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "'Bebas Neue',cursive",
+                          fontSize: 28,
+                          color: clr,
+                        }}
+                      >
+                        {t}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          background: `${clr}18`,
+                          color: clr,
+                          padding: "3px 10px",
+                          borderRadius: 20,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {status.toUpperCase()}
+                      </div>
+                    </div>
+                    {status !== "free" && (
+                      <>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#888",
+                            marginBottom: 2,
+                          }}
+                        >
+                          {tOrders[0]?.customerName || "—"}
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: "'JetBrains Mono',monospace",
+                            fontSize: 16,
+                            color: "#C8873A",
+                            fontWeight: 700,
+                          }}
+                        >
+                          ₹{running.toFixed(0)}
+                        </div>
+                      </>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      function ReportsTab({ bills, settings }) {
+        const todayDate = (() => {
+          const now = new Date();
+          return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        })();
+        const [fromDate, setFromDate] = useState("");
+        const [toDate, setToDate] = useState(todayDate);
+        const [showDetail, setShowDetail] = useState(null);
+
+        const filtered = bills.filter((b) => {
+          if (!b.dateTime) return true;
+          try {
+            const d = new Date(b.dateTime);
+            if (fromDate && d < new Date(fromDate)) return false;
+            if (toDate && d > new Date(toDate + "T23:59:59")) return false;
+          } catch {
+            return true;
+          }
+          return true;
+        });
+        const totalRevenue = filtered.reduce((a, b) => a + (+b.total || 0), 0);
+        const totalGST = filtered.reduce((a, b) => a + (+b.gstAmount || 0), 0);
+        const itemTotals = {};
+        filtered.forEach((b) => {
+          (b.items || []).forEach((item) => {
+            if (!itemTotals[item.name])
+              itemTotals[item.name] = { qty: 0, revenue: 0 };
+            itemTotals[item.name].qty += +item.qty || 0;
+            itemTotals[item.name].revenue += +item.lineTotal || 0;
+          });
+        });
+        const topItems = Object.entries(itemTotals)
+          .sort((a, b) => b[1].revenue - a[1].revenue)
+          .slice(0, 10);
+
+        const exportCSV = () => {
+          const header = "Bill ID,Table,Customer,Subtotal,GST,Total,Date\n";
+          const rows = filtered
+            .map(
+              (b) =>
+                `${b.billId},${b.tableNumber},${b.customerName},${(+b.subtotal).toFixed(2)},${(+b.gstAmount).toFixed(2)},${(+b.total).toFixed(2)},${b.dateTime}`,
+            )
+            .join("\n");
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(
+            new Blob([header + rows], { type: "text/csv" }),
+          );
+          a.download = "bills-export.csv";
+          a.click();
+        };
+
+        return (
+          <div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 14,
+              }}
+            >
+              <SectionTitle>Reports</SectionTitle>
+              <Btn
+                variant="secondary"
+                onClick={exportCSV}
+                style={{ padding: "9px 14px", fontSize: 12 }}
+              >
+                ⬇ CSV
+              </Btn>
+            </div>
+            <Card style={{ padding: "12px 14px", marginBottom: 14 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <Label>From Date</Label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    style={{ padding: "8px 10px" }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <Label>To Date</Label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    style={{ padding: "8px 10px" }}
+                  />
+                </div>
+                {(fromDate || toDate) && (
+                  <button
+                    onClick={() => {
+                      setFromDate("");
+                      setToDate("");
+                    }}
+                    style={{
+                      background: "#F0F0F5",
+                      border: "none",
+                      borderRadius: 8,
+                      padding: "8px 12px",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "#888",
+                      marginTop: 18,
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: "#888" }}>
+                {filtered.length} bill{filtered.length !== 1 ? "s" : ""} shown
+              </div>
+            </Card>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 10,
+                marginBottom: 20,
+              }}
+            >
+              {[
+                {
+                  label: "Total Revenue",
+                  value: `₹${totalRevenue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`,
+                  color: "#C8873A",
+                },
+                {
+                  label: "GST Collected",
+                  value: `₹${totalGST.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`,
+                  color: "#27AE60",
+                },
+                {
+                  label: "Total Bills",
+                  value: filtered.length,
+                  color: "#2980B9",
+                },
+              ].map((s) => (
+                <Card key={s.label} style={{ padding: "14px 16px" }}>
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+                    {s.label}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 20,
+                      fontWeight: 700,
+                      color: s.color,
+                    }}
+                  >
+                    {s.value}
+                  </div>
+                </Card>
+              ))}
+            </div>
+            <SectionTitle>Top Items</SectionTitle>
+            <Card style={{ marginBottom: 20 }}>
+              {topItems.length === 0 && (
+                <div
+                  style={{
+                    padding: 20,
+                    textAlign: "center",
+                    color: "#888",
+                    fontSize: 13,
+                  }}
+                >
+                  No data
+                </div>
+              )}
+              {topItems.map(([name, data], i) => (
+                <div
+                  key={name}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "12px 16px",
+                    borderBottom:
+                      i < topItems.length - 1 ? "1px solid #F0F0F5" : "none",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "'JetBrains Mono',monospace",
+                      fontSize: 11,
+                      color: "#CCC",
+                      width: 22,
+                    }}
+                  >
+                    #{i + 1}
+                  </div>
+                  <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>
+                    {name}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    {data.qty} units
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "'JetBrains Mono',monospace",
+                      color: "#C8873A",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    ₹{data.revenue.toFixed(0)}
+                  </div>
+                </div>
+              ))}
+            </Card>
+            <SectionTitle>Bill History</SectionTitle>
+            <Card>
+              {filtered.length === 0 && (
+                <div
+                  style={{
+                    padding: 20,
+                    textAlign: "center",
+                    color: "#888",
+                    fontSize: 13,
+                  }}
+                >
+                  No bills found
+                </div>
+              )}
+              {filtered
+                .slice()
+                .reverse()
+                .map((b, i) => (
+                  <div key={b.billId}>
+                    <div
+                      onClick={() =>
+                        setShowDetail(showDetail === b.billId ? null : b.billId)
+                      }
+                      style={{
+                        padding: "12px 16px",
+                        borderBottom: "1px solid #F0F0F5",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>
+                          {b.customerName || "Guest"} · T{b.tableNumber}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#888" }}>
+                          {b.dateTime}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontFamily: "'JetBrains Mono',monospace",
+                            fontSize: 15,
+                            fontWeight: 700,
+                            color: "#27AE60",
+                          }}
+                        >
+                          ₹{(+b.total || 0).toFixed(0)}
+                        </div>
+                        <div style={{ color: "#ccc", fontSize: 14 }}>
+                          {showDetail === b.billId ? "▲" : "▼"}
+                        </div>
+                      </div>
+                    </div>
+                    {showDetail === b.billId && (
+                      <div
+                        style={{
+                          padding: "8px 16px 12px",
+                          background: "#FAFAFA",
+                          borderBottom: "1px solid #F0F0F5",
+                        }}
+                      >
+                        {(b.items || []).map((it, j) => (
+                          <div
+                            key={j}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              fontSize: 12,
+                              color: "#555",
+                              padding: "3px 0",
+                            }}
+                          >
+                            <span>
+                              {it.name} × {it.qty} {it.unit}
+                            </span>
+                            <span>₹{(+it.lineTotal || 0).toFixed(0)}</span>
+                          </div>
+                        ))}
+                        <div
+                          style={{
+                            borderTop: "1px solid #eee",
+                            marginTop: 6,
+                            paddingTop: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              fontSize: 11,
+                              color: "#888",
+                            }}
+                          >
+                            <span>Subtotal</span>
+                            <span>₹{(+b.subtotal).toFixed(2)}</span>
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              fontSize: 11,
+                              color: "#888",
+                            }}
+                          >
+                            <span>GST</span>
+                            <span>₹{(+b.gstAmount).toFixed(2)}</span>
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: "#C8873A",
+                              marginTop: 4,
+                            }}
+                          >
+                            <span>Total</span>
+                            <span>₹{(+b.total).toFixed(2)}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => printBill(b, settings)}
+                          style={{
+                            marginTop: 8,
+                            background: "#1A1A2E",
+                            border: "none",
+                            color: "#C8873A",
+                            borderRadius: 8,
+                            padding: "7px 14px",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            width: "100%",
+                          }}
+                        >
+                          🖨️ Reprint
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </Card>
+          </div>
+        );
+      }
+
+      function PinChangeForm({ toast }) {
+        const [currentPin, setCurrentPin] = useState("");
+        const [newPin, setNewPin] = useState("");
+        const [confirm, setConfirm] = useState("");
+        const [saving, setSaving] = useState(false);
+        const handleChange = async () => {
+          if (!currentPin || !newPin) {
+            toast("Fill in all fields", "error");
+            return;
+          }
+          if (newPin !== confirm) {
+            toast("New PINs don't match", "error");
+            return;
+          }
+          if (newPin.length < 4) {
+            toast("PIN must be at least 4 digits", "error");
+            return;
+          }
+          setSaving(true);
+          try {
+            const verify = await gasGet("verifyPin", { pin: currentPin });
+            if (!verify.success || !verify.data?.valid) {
+              toast("Current PIN is wrong", "error");
+              setSaving(false);
+              return;
+            }
+            await gasGet("saveSettings", { managerPin: newPin });
+            toast("PIN changed!", "success");
+            setCurrentPin("");
+            setNewPin("");
+            setConfirm("");
+          } catch (e) {
+            toast("Save failed", "error");
+          }
+          setSaving(false);
+        };
+        return (
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
+          >
+            <div style={{ gridColumn: "1/-1" }}>
+              <Label>Current PIN</Label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={currentPin}
+                onChange={(e) => setCurrentPin(e.target.value)}
+                placeholder="Current PIN"
+              />
+            </div>
+            <div>
+              <Label>New PIN</Label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={newPin}
+                onChange={(e) => setNewPin(e.target.value)}
+                placeholder="Min 4 digits"
+              />
+            </div>
+            <div>
+              <Label>Confirm New PIN</Label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                placeholder="Repeat"
+              />
+            </div>
+            <div style={{ gridColumn: "1/-1" }}>
+              <Btn
+                onClick={handleChange}
+                disabled={saving}
+                style={{ width: "100%", padding: "13px 0" }}
+              >
+                {saving ? "Saving..." : "Change PIN"}
+              </Btn>
+            </div>
+          </div>
+        );
+      }
+
+      function SettingsTab({ settings, setSettings, toast }) {
+        const [form, setForm] = useState({ ...settings });
+        const [saving, setSaving] = useState(false);
+        const save = async () => {
+          setSaving(true);
+          try {
+            await gasGet("saveSettings", form);
+            setSettings(form);
+            toast("Settings saved!", "success");
+          } catch (e) {
+            toast("Save failed", "error");
+          }
+          setSaving(false);
+        };
+        const fields = [
+          { key: "barName", label: "Bar Name", full: true },
+          { key: "barAddress", label: "Address", full: true },
+          { key: "gstNumber", label: "GSTIN" },
+          { key: "gstRate", label: "GST Rate (%)", type: "number" },
+          { key: "tables", label: "Tables (comma separated)", full: true },
+          { key: "currency", label: "Currency Symbol" },
+          { key: "githubOwner", label: "GitHub Owner" },
+          { key: "githubRepo", label: "GitHub Repo" },
+          {
+            key: "githubToken",
+            label: "GitHub Token (PAT)",
+            type: "password",
+            full: true,
+          },
+        ];
+        return (
+          <div>
+            <SectionTitle>Settings</SectionTitle>
+            <Card
+              style={{
+                padding: "14px 16px",
+                marginBottom: 14,
+                borderLeft: "4px solid #C8873A",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#C8873A",
+                  marginBottom: 4,
+                }}
+              >
+                🔑 GitHub Token (for image uploads)
+              </div>
+              <div style={{ fontSize: 11, color: "#555" }}>
+                Go to GitHub → Settings → Developer settings → Fine-grained
+                tokens → New token → set Contents: Read &amp; Write on your
+                repo.
+              </div>
+            </Card>
+            <Card style={{ padding: "20px 16px", marginBottom: 14 }}>
+              <div
+                style={{
+                  marginBottom: 14,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 12px",
+                  background: "#F7F8FA",
+                  borderRadius: 10,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                    GST Inclusive Pricing
+                  </div>
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    If ON, menu prices already include GST
+                  </div>
+                </div>
+                <button
+                  onClick={() =>
+                    setForm((p) => ({ ...p, gstInclusive: !p.gstInclusive }))
+                  }
+                  style={{
+                    background: form.gstInclusive ? "#C8873A" : "#E0E0EE",
+                    border: "none",
+                    borderRadius: 20,
+                    width: 48,
+                    height: 26,
+                    position: "relative",
+                    transition: "background 0.2s",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 3,
+                      left: form.gstInclusive ? 24 : 3,
+                      width: 20,
+                      height: 20,
+                      borderRadius: "50%",
+                      background: "#FFF",
+                      transition: "left 0.2s",
+                      boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                    }}
+                  />
+                </button>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                {fields.map((f) => (
+                  <div key={f.key} style={f.full ? { gridColumn: "1/-1" } : {}}>
+                    <Label>{f.label}</Label>
+                    <input
+                      type={f.type || "text"}
+                      value={form[f.key] || ""}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, [f.key]: e.target.value }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+              <Btn
+                onClick={save}
+                disabled={saving}
+                style={{
+                  marginTop: 20,
+                  width: "100%",
+                  padding: "14px 0",
+                  fontSize: 14,
+                }}
+              >
+                {saving ? "Saving..." : "Save Settings"}
+              </Btn>
+            </Card>
+            <Card style={{ padding: "20px 16px" }}>
+              <div
+                style={{
+                  fontFamily: "'Bebas Neue',cursive",
+                  fontSize: 16,
+                  letterSpacing: 2,
+                  marginBottom: 12,
+                }}
+              >
+                CHANGE MANAGER PIN
+              </div>
+              <PinChangeForm toast={toast} />
+            </Card>
+          </div>
+        );
+      }
+
+      function Dashboard({
+        inventory,
+        setInventory,
+        orders,
+        bills,
+        setBills,
+        settings,
+        setSettings,
+        tables,
+        getTableStatus,
+        toast,
+        refreshInventory,
+      }) {
+        const [tab, setTab] = useState("overview");
+        const tabs = [
+          { id: "overview", icon: "📊", label: "Overview" },
+          { id: "inventory", icon: "🍾", label: "Inventory" },
+          { id: "tables", icon: "🪑", label: "Tables" },
+          { id: "reports", icon: "📈", label: "Reports" },
+          { id: "settings", icon: "⚙️", label: "Settings" },
+        ];
+        return (
+          <div style={{ display: "flex", height: "calc(100vh - 58px)" }}>
+            <div
+              style={{
+                width: 56,
+                background: "#FFFFFF",
+                borderRight: "1px solid #EBEBF5",
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                paddingTop: 8,
+                flexShrink: 0,
+              }}
+            >
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  title={t.label}
+                  style={{
+                    background: tab === t.id ? "#FFF3E6" : "transparent",
+                    borderLeft:
+                      tab === t.id
+                        ? "3px solid #C8873A"
+                        : "3px solid transparent",
+                    border: "none",
+                    padding: "13px 0",
+                    fontSize: 20,
+                    textAlign: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  {t.icon}
+                </button>
+              ))}
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+              {tab === "overview" && (
+                <OverviewTab
+                  orders={orders}
+                  bills={bills}
+                  inventory={inventory}
+                />
+              )}
+              {tab === "inventory" && (
+                <InventoryTab
+                  inventory={inventory}
+                  setInventory={setInventory}
+                  settings={settings}
+                  toast={toast}
+                />
+              )}
+              {tab === "tables" && (
+                <TablesTab
+                  tables={tables}
+                  getTableStatus={getTableStatus}
+                  orders={orders}
+                />
+              )}
+              {tab === "reports" && (
+                <ReportsTab bills={bills} settings={settings} />
+              )}
+              {tab === "settings" && (
+                <SettingsTab
+                  settings={settings}
+                  setSettings={setSettings}
+                  toast={toast}
+                />
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // ── ROOT APP ──────────────────────────────────────────────────
+      function App() {
+        const [appAuthed, setAppAuthed] = useState(
+          () => sessionStorage.getItem(SESSION_KEY) === "1",
+        );
+        const [mode, setMode] = useState("server");
+        const [pinUnlocked, setPinUnlocked] = useState(false);
+        const [loading, setLoading] = useState(false);
+        const [inventory, setInventory] = useState([]);
+        const [orders, setOrders] = useState([]);
+        const [bills, setBills] = useState([]);
+        const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+        const { toasts, toast } = useToast();
+
+        const tables = useMemo(
+          () =>
+            settings.tables
+              ?.split(",")
+              .map((t) => t.trim())
+              .filter(Boolean) || [],
+          [settings.tables],
+        );
+
+        const getTableStatus = useCallback(
+          (table) => {
+            const rows = orders.filter(
+              (o) => o.tableNumber === table && o.status === "open",
+            );
+            if (!rows.length) return "free";
+            return "occupied";
+          },
+          [orders],
+        );
+
+        const refreshInventory = async () => {
+          try {
+            const res = await gasGet("getInventory");
+            if (res.success && res.data?.length)
+              setInventory(res.data.map(mapInvRow));
+          } catch (e) {}
+        };
+
+        // Only load data after app auth
+        useEffect(() => {
+          if (!appAuthed) return;
+          const load = async () => {
+            setLoading(true);
+            try {
+              gasGet("fixOrdersHeaders").catch(() => {});
+              gasGet("fixInventoryHeaders").catch(() => {});
+              const [invRes, ordRes, billRes, settRes] = await Promise.all([
+                gasGet("getInventory"),
+                gasGet("getOrders"),
+                gasGet("getBills"),
+                gasGet("getSettings"),
+              ]);
+              if (invRes.success && invRes.data?.length)
+                setInventory(invRes.data.map(mapInvRow));
+              if (ordRes.success && ordRes.data?.length)
+                setOrders(ordRes.data.map(mapOrderRow));
+              if (billRes.success && billRes.data?.length)
+                setBills(billRes.data.map(mapBillRow));
+              if (settRes.success && Object.keys(settRes.data || {}).length)
+                setSettings((s) => ({ ...s, ...settRes.data }));
+            } catch (e) {
+              toast("Could not reach server", "info");
+            }
+            setLoading(false);
+          };
+          load();
+        }, [appAuthed]);
+
+        const handleModeChange = (m) => {
+          setMode(m);
+          if (m === "server") setPinUnlocked(false);
+        };
+
+        // ── NOT AUTHED: show app login ──
+        if (!appAuthed)
+          return (
+            <>
+              <AppLoginScreen onAuth={() => setAppAuthed(true)} toast={toast} />
+              <ToastContainer toasts={toasts} />
+            </>
+          );
+
+        if (loading) return <LoadingScreen />;
+
+        return (
+          <div
+            style={{
+              background: "#F7F8FA",
+              minHeight: "100vh",
+              color: "#1A1A2E",
+            }}
+          >
+            <TopBar
+              mode={mode}
+              setMode={handleModeChange}
+              barName={settings.barName}
+            />
+            {mode === "server" && (
+              <ServerApp
+                inventory={inventory}
+                orders={orders}
+                setOrders={setOrders}
+                bills={bills}
+                setBills={setBills}
+                tables={tables}
+                getTableStatus={getTableStatus}
+                settings={settings}
+                toast={toast}
+                refreshInventory={refreshInventory}
+              />
+            )}
+            {mode === "dashboard" &&
+              (pinUnlocked ? (
+                <Dashboard
+                  inventory={inventory}
+                  setInventory={setInventory}
+                  orders={orders}
+                  bills={bills}
+                  setBills={setBills}
+                  settings={settings}
+                  setSettings={setSettings}
+                  tables={tables}
+                  getTableStatus={getTableStatus}
+                  toast={toast}
+                  refreshInventory={refreshInventory}
+                />
+              ) : (
+                <PinScreen
+                  onUnlock={() => setPinUnlocked(true)}
+                  toast={toast}
+                />
+              ))}
+            <ToastContainer toasts={toasts} />
+          </div>
+        );
+      }
+
+      try {
+        ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+      } catch (e) {
+        const el = document.getElementById("vb-err");
+        if (el) {
+          el.style.display = "block";
+          el.textContent = "Error: " + e.message;
+        }
+      }
+    </script>
+    <script>
+      window.addEventListener("error", function (e) {
+        var el = document.getElementById("vb-err"),
+          init = document.getElementById("vb-init");
+        if (el && init) {
+          init.style.display = "flex";
+          el.style.display = "block";
+          el.textContent =
+            (e.message || "Script failed to load") +
+            (e.filename ? " — " + e.filename.split("/").pop() : "");
+        }
+      });
+      setTimeout(function () {
+        var init = document.getElementById("vb-init");
+        if (init && init.style.display !== "none") {
+          var el = document.getElementById("vb-err");
+          if (el && !el.textContent) {
+            el.style.display = "block";
+            el.textContent =
+              "Timed out — CDN may be blocked. Try refreshing or check network.";
+          }
+        }
+      }, 8000);
+    </script>
+  </body>
+</html>
