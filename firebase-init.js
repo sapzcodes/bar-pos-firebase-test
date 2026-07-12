@@ -11,11 +11,11 @@ firebase.initializeApp({
   appId: "1:477169972182:web:c92372bb2d8af057deaa77"
 });
 
-firebase.firestore().enablePersistence({ synchronizeTabs: false }).catch(() => {});
-firebase.firestore().settings({ experimentalForceLongPolling: true });
-
 const db = firebase.firestore();
-const GAS_URL = "/api/gas"; 
+// Forces standard HTTP requests to bypass Ad-Blockers blocking WebSockets
+db.settings({ experimentalForceLongPolling: true }); 
+
+const GAS_URL = "/api/gas"; // KEEP for email sending only
 
 async function sendEmail(action, body) {
   let url = GAS_URL + "?action=" + action;
