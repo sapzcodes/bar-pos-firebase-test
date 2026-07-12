@@ -47,7 +47,9 @@ function isLowStock(q, t) { return (+q || 0) <= (+t || 2); }
 function bottlesToDisplay(q) { const n=+q||0; if(n===0) return "0 btl"; if(n<1) return (n*750).toFixed(0)+"ml"; return (n%1===0?n:n.toFixed(2))+" btl"; }
 
 async function firebaseLogin(password) {
-  const doc = await db.doc("settings/appPassword").get();
+  // The { source: 'server' } option forces Firestore to reject the promise 
+  // immediately if it cannot reach the network, rather than hanging forever.
+  const doc = await db.doc("settings/appPassword").get({ source: 'server' });
   return { valid: String(password) === String(doc.exists ? doc.data().value : "2121") };
 }
 async function firebaseVerifyPin(pin) {
