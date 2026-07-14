@@ -566,14 +566,12 @@
           setRLoad(true);
           try {
             const o = String(Math.floor(100000 + Math.random() * 900000));
-            await db
-              .doc("otps/appPassword")
-              .set({
-                otp: o,
-                expiresAt: firebase.firestore.Timestamp.fromDate(
-                  new Date(Date.now() + 600000),
-                ),
-              });
+            await db.doc("otps/appPassword").set({
+              otp: o,
+              expiresAt: firebase.firestore.Timestamp.fromDate(
+                new Date(Date.now() + 600000),
+              ),
+            });
             const s = await getSettingsRaw();
             const r = await sendEmail("sendOtpEmail", {
               otp: o,
@@ -603,17 +601,14 @@
                 toast("Expired", "error");
               else if (otp !== d.otp) toast("Invalid OTP", "error");
               else {
-                await db
-                  .doc("settings/appPassword")
-                  .set(
-                    {
-                      key: "appPassword",
-                      value: np,
-                      updatedAt:
-                        firebase.firestore.FieldValue.serverTimestamp(),
-                    },
-                    { merge: true },
-                  );
+                await db.doc("settings/appPassword").set(
+                  {
+                    key: "appPassword",
+                    value: np,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                  },
+                  { merge: true },
+                );
                 await db.doc("otps/appPassword").delete();
                 toast("Reset! Login now.", "success");
                 setView("login");
@@ -1230,9 +1225,10 @@
       }
 
       function App() {
-        const [auth, setAuth] = useState(
-          sessionStorage.getItem(SESSION_KEY) === "1",
-        );
+        // const [auth, setAuth] = useState(
+        //  sessionStorage.getItem(SESSION_KEY) === "1",
+        // );
+        const [auth, setAuth] = useState(true);
         const [mode, setMode] = useState("server");
         const [settings, setSettings] = useState(DEFAULT_SETTINGS);
         const [inv, setInv] = useState([]);
