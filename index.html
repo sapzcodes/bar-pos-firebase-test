@@ -61,7 +61,7 @@
       };
 
       const app = initializeApp(firebaseConfig);
-      const db = getFirestore(app);
+      const db = getFirestore(app, "pushpambar-db");
       const auth = getAuth(app);
 
       // Test: sign in anonymously and try a Firestore read
@@ -97,7 +97,7 @@
       // ── SETTINGS ──────────────────────────────────────────────────
       async function getSettings() {
         console.log("📡 Fetching settings doc via REST...");
-        const url = `https://firestore.googleapis.com/v1/projects/pushpam-bar-pos/databases/(default)/documents/settings/main`;
+        const url = `https://firestore.googleapis.com/v1/projects/pushpam-bar-pos/databases/pushpambar-db/documents/settings/main`;
         const res = await fetch(url);
         if (!res.ok) {
           console.warn("⚠️ settings/main not found, returning defaults");
@@ -133,7 +133,7 @@
           else if (typeof v === "number") fields[k] = { doubleValue: v };
           else fields[k] = { stringValue: String(v ?? "") };
         }
-        const url = `https://firestore.googleapis.com/v1/projects/pushpam-bar-pos/databases/(default)/documents/settings/main`;
+        const url = `https://firestore.googleapis.com/v1/projects/pushpam-bar-pos/databases/pushpambar-db/documents/settings/main`;
         await fetch(url, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
