@@ -95,7 +95,9 @@
 
       // ── SETTINGS ──────────────────────────────────────────────────
       async function getSettings() {
+        console.log("📡 Fetching settings doc...");
         const snap = await getDoc(doc(db, "settings", "main"));
+        console.log("📄 Settings snap exists:", snap.exists(), snap.data());
         return snap.exists() ? snap.data() : {};
       }
       async function saveSettings(data) {
@@ -111,8 +113,18 @@
 
       // ── AUTH ──────────────────────────────────────────────────────
       async function verifyAppPassword(password) {
-        const s = await getSettings();
-        return { valid: String(password) === String(s.appPassword || "2121") };
+        console.log("🔍 verifyAppPassword called with:", password);
+        try {
+          const s = await getSettings();
+          console.log("📦 Settings fetched:", s);
+          console.log("🔑 Stored password:", s.appPassword);
+          return {
+            valid: String(password) === String(s.appPassword || "2121"),
+          };
+        } catch (e) {
+          console.error("❌ getSettings failed:", e);
+          return { valid: false };
+        }
       }
       async function verifyPin(pin) {
         const s = await getSettings();
