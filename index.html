@@ -96,9 +96,22 @@
       // ── SETTINGS ──────────────────────────────────────────────────
       async function getSettings() {
         console.log("📡 Fetching settings doc...");
-        const snap = await getDoc(doc(db, "settings", "main"));
-        console.log("📄 Settings snap exists:", snap.exists(), snap.data());
-        return snap.exists() ? snap.data() : {};
+
+        // Retry up to 5 times with increasing delay
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          try {
+            const snap = await getDoc(doc(db, "settings", "main"));
+            console.log("📄 Settings snap exists:", snap.exists(), snap.data());
+            return snap.exists() ? snap.data() : {};
+          } catch (e) {
+            console.warn(`⚠️ Attempt ${attempt} failed:`, e.code);
+            if (attempt === 5) throw e;
+            // Wait longer each retry: 500ms, 1s, 2s, 4s
+            await new Promise((r) =>
+              setTimeout(r, 500 * Math.pow(2, attempt - 1)),
+            );
+          }
+        }
       }
       async function saveSettings(data) {
         const existing = await getSettings();
@@ -116,14 +129,13 @@
         console.log("🔍 verifyAppPassword called with:", password);
         try {
           const s = await getSettings();
-          console.log("📦 Settings fetched:", s);
-          console.log("🔑 Stored password:", s.appPassword);
+          console.log("📦 Settings:", s);
           return {
             valid: String(password) === String(s.appPassword || "2121"),
           };
         } catch (e) {
           console.error("❌ getSettings failed:", e);
-          return { valid: false };
+          throw e; // let React catch it and show "Connection error"
         }
       }
       async function verifyPin(pin) {
