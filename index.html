@@ -27,6 +27,11 @@
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
       import {
+        getAuth,
+        signInAnonymously,
+        onAuthStateChanged,
+      } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+      import {
         getFirestore,
         collection,
         doc,
@@ -56,7 +61,28 @@
 
       const app = initializeApp(firebaseConfig);
       const db = getFirestore(app);
+      const auth = getAuth(app);
 
+      // Test: sign in anonymously and try a Firestore read
+      signInAnonymously(auth)
+        .then((cred) => {
+          console.log("✅ Firebase Auth OK — UID:", cred.user.uid);
+          // Now test Firestore
+          return getDoc(doc(db, "settings", "main"));
+        })
+        .then((snap) => {
+          console.log("✅ Firestore read OK — exists:", snap.exists());
+        })
+        .catch((err) => {
+          console.error("❌ Firebase error:", err.code, err.message);
+          const el = document.getElementById("vb-err");
+          const init = document.getElementById("vb-init");
+          if (el && init) {
+            init.style.display = "flex";
+            el.style.display = "block";
+            el.textContent = `Firebase: ${err.code} — ${err.message}`;
+          }
+        });
       // ── ID GENERATION ─────────────────────────────────────────────
       async function getNextId(counterName, prefix, padLen = 4) {
         const ref = doc(db, "counters", counterName);
