@@ -29,7 +29,6 @@
       import {
         getAuth,
         signInAnonymously,
-        onAuthStateChanged,
       } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
       import {
         getFirestore,
@@ -45,9 +44,7 @@
         where,
         orderBy,
         serverTimestamp,
-        increment,
         writeBatch,
-        Timestamp,
         onSnapshot,
       } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -64,11 +61,9 @@
       const db = getFirestore(app, "pushpambar-db");
       const auth = getAuth(app);
 
-      // Test: sign in anonymously and try a Firestore read
       signInAnonymously(auth)
         .then((cred) => {
           console.log("✅ Firebase Auth OK — UID:", cred.user.uid);
-          // Now test Firestore
           return getDoc(doc(db, "settings", "main"));
         })
         .then((snap) => {
@@ -84,7 +79,7 @@
             el.textContent = `Firebase: ${err.code} — ${err.message}`;
           }
         });
-      // ── ID GENERATION ─────────────────────────────────────────────
+
       async function getNextId(counterName, prefix, padLen = 4) {
         const ref = doc(db, "counters", counterName);
         const snap = await getDoc(ref);
@@ -94,15 +89,10 @@
         return `${prefix}-${String(next).padStart(padLen, "0")}`;
       }
 
-      // ── SETTINGS ──────────────────────────────────────────────────
       async function getSettings() {
-        console.log("📡 Fetching settings doc via REST...");
         const url = `https://firestore.googleapis.com/v1/projects/pushpam-bar-pos/databases/pushpambar-db/documents/settings/main`;
         const res = await fetch(url);
-        if (!res.ok) {
-          console.warn("⚠️ settings/main not found, returning defaults");
-          return {};
-        }
+        if (!res.ok) return {};
         const json = await res.json();
         const fields = json.fields || {};
         const result = {};
@@ -115,18 +105,19 @@
           else if (v.booleanValue !== undefined) result[k] = v.booleanValue;
           else result[k] = null;
         }
-        console.log("📄 Settings loaded:", result);
         return result;
       }
+
       async function saveSettings(data) {
         const existing = await getSettings();
-        const merged = { ...existing, ...data };
+        // Strip GitHub fields — those come from env vars, not Firestore
+        const { githubOwner, githubRepo, githubToken, ...rest } = data;
+        const merged = { ...existing, ...rest };
         if (merged.managerPin === "••••")
           merged.managerPin = existing.managerPin || "1234";
         if (merged.appPassword === "••••")
           merged.appPassword = existing.appPassword || "2121";
 
-        // Convert to Firestore REST format
         const fields = {};
         for (const [k, v] of Object.entries(merged)) {
           if (typeof v === "boolean") fields[k] = { booleanValue: v };
@@ -142,18 +133,14 @@
         return { saved: true };
       }
 
-      // ── AUTH ──────────────────────────────────────────────────────
       async function verifyAppPassword(password) {
-        console.log("🔍 verifyAppPassword called with:", password);
         try {
           const s = await getSettings();
-          console.log("📦 Settings:", s);
           return {
             valid: String(password) === String(s.appPassword || "2121"),
           };
         } catch (e) {
-          console.error("❌ getSettings failed:", e);
-          throw e; // let React catch it and show "Connection error"
+          throw e;
         }
       }
       async function verifyPin(pin) {
@@ -161,13 +148,11 @@
         return { valid: String(pin) === String(s.managerPin || "1234") };
       }
 
-      // OTP stored in Firestore "otps/appPassword"
       async function sendAppPasswordOtp() {
         const s = await getSettings();
         const otp = String(Math.floor(100000 + Math.random() * 900000));
         const expiry = Date.now() + 10 * 60 * 1000;
         await setDoc(doc(db, "otps", "appPassword"), { otp, expiry });
-        // Call GAS email service
         await gasEmail("sendOtpEmail", {
           otp,
           barName: s.barName || "Pushpam A/C Bar",
@@ -184,12 +169,7 @@
         if (String(otp) !== String(stored))
           return { reset: false, reason: "Invalid OTP" };
         const s = await getSettings();
-        await saveSettings({
-          ...s,
-          appPassword: String(newPassword),
-          appOtp: "",
-          appOtpExpiry: "",
-        });
+        await saveSettings({ ...s, appPassword: String(newPassword) });
         await deleteDoc(doc(db, "otps", "appPassword"));
         return { reset: true };
       }
@@ -202,7 +182,6 @@
         return { sent: true };
       }
 
-      // ── GAS EMAIL HELPER ──────────────────────────────────────────
       const GAS_EMAIL_URL =
         "https://script.google.com/macros/s/AKfycbwyfjwqf90RfoWzLWub-mScxDEdCf34RfUUv82RPVWx4jezlYLNZdRITWoPEBhjPyV3/exec";
       async function gasEmail(action, body) {
@@ -211,7 +190,6 @@
         return res.json();
       }
 
-      // ── INVENTORY ─────────────────────────────────────────────────
       async function getInventory() {
         const snap = await getDocs(
           query(collection(db, "inventory"), where("active", "==", true)),
@@ -241,13 +219,11 @@
           lowStockThreshold: +body.lowStockThreshold || 2,
           active: true,
           createdAt: serverTimestamp(),
-          // Human-readable for the log report
           addedDate: now.toLocaleDateString("en-IN"),
           addedTime: now.toLocaleTimeString("en-IN"),
           addedDateISO: now.toISOString(),
         };
         const ref = await addDoc(collection(db, "inventory"), payload);
-        // Log to inventoryLog collection
         await addDoc(collection(db, "inventoryLog"), {
           ...payload,
           firestoreId: ref.id,
@@ -280,7 +256,6 @@
           updates.lowStockThreshold = +body.lowStockThreshold;
         updates.updatedAt = serverTimestamp();
         await updateDoc(ref, updates);
-        // Log update
         const now = new Date();
         await addDoc(collection(db, "inventoryLog"), {
           ...updates,
@@ -321,8 +296,6 @@
         });
         return { newQty };
       }
-
-      // ── INVENTORY LOG ─────────────────────────────────────────────
       async function getInventoryLog() {
         const snap = await getDocs(
           query(collection(db, "inventoryLog"), orderBy("loggedAt", "desc")),
@@ -330,12 +303,10 @@
         return snap.docs.map((d) => ({ firestoreId: d.id, ...d.data() }));
       }
 
-      // ── ORDERS ────────────────────────────────────────────────────
       async function getOrders() {
         const snap = await getDocs(collection(db, "orders"));
         return snap.docs.map((d) => ({ firestoreId: d.id, ...d.data() }));
       }
-
       function calcBottlesUsed(item) {
         if (["Liquor", "Beer"].includes(item.category)) {
           if (item.unit === "bottle") return item.qty;
@@ -344,14 +315,16 @@
         }
         return item.qty;
       }
-
-      async function applyInventoryDeltas(lines, sign, db) {
+      async function applyInventoryDeltas(lines, sign, dbRef) {
         if (!lines || !lines.length) return;
         const lowStockAlerts = [];
         for (const item of lines) {
           if (!item.qty) continue;
           const snap = await getDocs(
-            query(collection(db, "inventory"), where("id", "==", item.itemId)),
+            query(
+              collection(dbRef, "inventory"),
+              where("id", "==", item.itemId),
+            ),
           );
           if (snap.empty) continue;
           const data = snap.docs[0].data();
@@ -381,11 +354,9 @@
           }).catch(() => {});
         }
       }
-
       async function saveOrder(body) {
         const newRows = Array.isArray(body.orders) ? body.orders : [body];
         if (body.tableNumber) {
-          // Find and remove existing open orders for this table
           const existing = await getDocs(
             query(
               collection(db, "orders"),
@@ -406,14 +377,11 @@
               };
             prevLines[key].qty += o.qty || 0;
           });
-          // Batch delete old open orders
           const batch = writeBatch(db);
           existing.docs.forEach((d) => batch.delete(d.ref));
           await batch.commit();
-          // Restore stock from previous open orders
           await applyInventoryDeltas(Object.values(prevLines), +1, db);
         }
-        // Apply deduction from new orders
         const newLines = {};
         newRows.forEach((o) => {
           const key = `${o.itemId}-${o.unit}`;
@@ -427,7 +395,6 @@
           newLines[key].qty += o.qty || 0;
         });
         await applyInventoryDeltas(Object.values(newLines), -1, db);
-        // Write new order docs
         const batch2 = writeBatch(db);
         for (const o of newRows) {
           const ref = doc(collection(db, "orders"));
@@ -436,7 +403,6 @@
         await batch2.commit();
         return { saved: newRows.length };
       }
-
       async function updateOrderStatus(body) {
         const snap = await getDocs(
           query(
@@ -453,7 +419,6 @@
         return { updated: snap.docs.length };
       }
 
-      // ── BILLS ─────────────────────────────────────────────────────
       async function getBills() {
         const snap = await getDocs(
           query(collection(db, "bills"), orderBy("createdAt", "asc")),
@@ -468,7 +433,18 @@
         return { saved: true };
       }
 
-      // ── EXPOSE TO WINDOW for React app ────────────────────────────
+      // ── Fetch GitHub config from Vercel env vars ──────────────────
+      async function fetchServerConfig() {
+        try {
+          const res = await fetch("/api/config");
+          if (!res.ok) return {};
+          return await res.json();
+        } catch (e) {
+          console.warn("Could not fetch /api/config:", e.message);
+          return {};
+        }
+      }
+
       window.DB = {
         getSettings,
         saveSettings,
@@ -488,6 +464,7 @@
         updateOrderStatus,
         getBills,
         saveBill,
+        fetchServerConfig,
       };
       window._DB_READY = true;
       document.dispatchEvent(new Event("db-ready"));
@@ -646,10 +623,10 @@
         gstInclusive: false,
         tables: "T1,T2,T3,T4,T5,T6,T7,T8",
         currency: "₹",
+        // GitHub fields populated from /api/config, never from Firestore
         githubOwner: "",
         githubRepo: "",
         githubToken: "",
-        logoPath: "",
       };
 
       const CATEGORIES = [
@@ -662,7 +639,6 @@
       ];
       const LIQUOR_CATS = ["Liquor", "Beer"];
 
-      // Wait for Firebase to initialise
       function useDB() {
         const [ready, setReady] = useState(!!window._DB_READY);
         useEffect(() => {
@@ -892,12 +868,9 @@
   <tbody>${logs
     .map(
       (l, i) => `<tr>
-    <td>${i + 1}</td>
-    <td>${l.loggedDate || l.addedDate || ""}</td>
-    <td>${l.loggedTime || l.addedTime || ""}</td>
+    <td>${i + 1}</td><td>${l.loggedDate || l.addedDate || ""}</td><td>${l.loggedTime || l.addedTime || ""}</td>
     <td class="action-${l.action || "add"}">${(l.action || "add").toUpperCase()}</td>
-    <td>${l.name || ""}</td>
-    <td>${l.category || ""}</td>
+    <td>${l.name || ""}</td><td>${l.category || ""}</td>
     <td>${l.qtyAvailable != null ? l.qtyAvailable : ""}</td>
     <td>${l.price30ml != null ? "₹" + l.price30ml : ""}</td>
     <td>${l.priceBottle != null ? "₹" + l.priceBottle : ""}</td>
@@ -3652,7 +3625,7 @@
                                 <span
                                   style={{ color: "#E74C3C", fontSize: 10 }}
                                 >
-                                  (configure GitHub in Settings)
+                                  (GitHub env vars not configured)
                                 </span>
                               )}
                             </Label>
@@ -3830,7 +3803,6 @@
         const [fromDate, setFromDate] = useState("");
         const [toDate, setToDate] = useState(todayDate);
         const [showDetail, setShowDetail] = useState(null);
-        // Inventory log state
         const [invLogs, setInvLogs] = useState([]);
         const [invLogsLoading, setInvLogsLoading] = useState(false);
         const [invFromDate, setInvFromDate] = useState("");
@@ -3939,7 +3911,6 @@
 
         return (
           <div>
-            {/* Report type toggle */}
             <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
               {[
                 { id: "sales", label: "💰 Sales" },
@@ -4337,8 +4308,6 @@
                     </button>
                   </div>
                 </div>
-
-                {/* Filters */}
                 <Card style={{ padding: "12px 14px", marginBottom: 14 }}>
                   <div
                     style={{
@@ -4412,7 +4381,6 @@
                     {filteredInvLogs.length !== 1 ? "s" : ""} shown
                   </div>
                 </Card>
-
                 {invLogsLoading ? (
                   <div
                     style={{
@@ -4435,7 +4403,6 @@
                   </Card>
                 ) : (
                   <Card>
-                    {/* Header row */}
                     <div
                       style={{
                         display: "grid",
@@ -4656,13 +4623,14 @@
           setSaving(true);
           try {
             await db.saveSettings(form);
-            setSettings(form);
+            setSettings((s) => ({ ...s, ...form }));
             toast("Settings saved!", "success");
           } catch (e) {
             toast("Save failed", "error");
           }
           setSaving(false);
         };
+        // GitHub fields removed — sourced from Vercel env vars via /api/config
         const fields = [
           { key: "barName", label: "Bar Name", full: true },
           { key: "barAddress", label: "Address", full: true },
@@ -4670,14 +4638,6 @@
           { key: "gstRate", label: "GST Rate (%)", type: "number" },
           { key: "tables", label: "Tables (comma separated)", full: true },
           { key: "currency", label: "Currency Symbol" },
-          { key: "githubOwner", label: "GitHub Owner" },
-          { key: "githubRepo", label: "GitHub Repo" },
-          {
-            key: "githubToken",
-            label: "GitHub Token (PAT)",
-            type: "password",
-            full: true,
-          },
         ];
         return (
           <div>
@@ -4700,8 +4660,8 @@
                 🔥 Firebase Backend Active
               </div>
               <div style={{ fontSize: 11, color: "#555" }}>
-                Data is stored in Cloud Firestore. Email alerts sent via Google
-                Apps Script.
+                Data stored in Cloud Firestore. GitHub credentials loaded from
+                Vercel env vars. Email via Google Apps Script.
               </div>
             </Card>
             <Card style={{ padding: "20px 16px", marginBottom: 14 }}>
@@ -4948,17 +4908,25 @@
           const load = async () => {
             setLoading(true);
             try {
-              const [inv, ord, bl, sett] = await Promise.all([
+              // Fetch Firestore data + server config in parallel
+              const [inv, ord, bl, sett, serverCfg] = await Promise.all([
                 db.getInventory(),
                 db.getOrders(),
                 db.getBills(),
                 db.getSettings(),
+                db.fetchServerConfig(),
               ]);
               if (inv?.length) setInventory(inv.map(mapInvRow));
               if (ord?.length) setOrders(ord.map(mapOrderRow));
               if (bl?.length) setBills(bl.map(mapBillRow));
-              if (sett && Object.keys(sett).length)
-                setSettings((s) => ({ ...s, ...sett }));
+              // Merge: Firestore settings + GitHub from env vars (env vars win)
+              setSettings((s) => ({
+                ...s,
+                ...(sett && Object.keys(sett).length ? sett : {}),
+                githubOwner: serverCfg.githubOwner || "",
+                githubRepo: serverCfg.githubRepo || "",
+                githubToken: serverCfg.githubToken || "",
+              }));
             } catch (e) {
               toast("Could not load data from Firebase", "error");
             }
