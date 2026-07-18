@@ -435,14 +435,7 @@
 
       // ── Fetch GitHub config from Vercel env vars ──────────────────
       async function fetchServerConfig() {
-        try {
-          const res = await fetch("/api/config");
-          if (!res.ok) return {};
-          return await res.json();
-        } catch (e) {
-          console.warn("Could not fetch /api/config:", e.message);
-          return {};
-        }
+        return {};
       }
 
       window.DB = {
@@ -761,43 +754,22 @@
           r.readAsDataURL(file);
         });
       }
-      async function uploadToGithub(file, itemId, settings) {
-        const { githubOwner, githubRepo, githubToken } = settings;
-        if (!githubOwner || !githubRepo || !githubToken) return "";
+      async function uploadToGithub(file, itemId) {
         const base64Full = await fileToBase64(file);
         const base64Content = base64Full.split(",")[1];
-        const ext = file.type.includes("png") ? "png" : "jpg";
-        const path = `images/${itemId}.${ext}`;
-        let sha = undefined;
-        try {
-          const check = await fetch(
-            `https://api.github.com/repos/${githubOwner}/${githubRepo}/contents/${path}`,
-            { headers: { Authorization: `token ${githubToken}` } },
-          );
-          if (check.ok) {
-            const ex = await check.json();
-            sha = ex.sha;
-          }
-        } catch (_) {}
-        const payload = {
-          message: `Upload image for ${itemId}`,
-          content: base64Content,
-        };
-        if (sha) payload.sha = sha;
-        const res = await fetch(
-          `https://api.github.com/repos/${githubOwner}/${githubRepo}/contents/${path}`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `token ${githubToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-          },
-        );
+
+        const res = await fetch("/api/upload-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base64Content,
+            itemId,
+            fileType: file.type,
+          }),
+        });
+
         const json = await res.json();
-        if (json.content?.download_url) return json.content.download_url;
-        return `https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/main/${path}`;
+        return json.imageUrl || "";
       }
 
       function printBill(bill, settings) {
